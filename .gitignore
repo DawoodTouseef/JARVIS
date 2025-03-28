@@ -7,4 +7,5 @@ db/
 data/
 core/db
 core/data
-.idea
+.idea/
+logs/

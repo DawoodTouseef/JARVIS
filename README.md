@@ -83,4 +83,4 @@ This project is licensed under the MIT License. See  for details.
 - Special thanks to the open-source community for tools like **mem0** , **pvporcupine** , **crewai** and many more.
 
 ### Contact
-For questions or feedback, reach out to [Dawood Thouseef](tdawood140@gmail.com).
+For questions or feedback, reach out to [Dawood Thouseef](mailto://tdawood140@gmail.com).

@@ -1,7 +1,7 @@
 import os
 import logging
 import sys
-from threading import Lock
+
 from pathlib import Path
 import shutil
 from pydantic import BaseModel
@@ -35,18 +35,7 @@ except ImportError:
 ####################################
 # LOGGING
 ####################################
-# Thread-safe logging handler
-class ThreadSafeHandler(logging.Handler):
-    def __init__(self, filename, mode='a', encoding='utf-8'):
-        super().__init__()
-        self.handler = logging.FileHandler(filename, mode, encoding)
-        self.lock = Lock()
-
-    def emit(self, record):
-        with self.lock:
-            self.handler.emit(record)
-
-LOG_DIR = os.path.join(SESSION_PATH, "logs")
+LOG_DIR = os.path.join(JARVIS_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LOG_FILE = os.path.join(LOG_DIR, "app.log")
@@ -64,7 +53,7 @@ logging.basicConfig(
     level=getattr(logging, GLOBAL_LOG_LEVEL),
     format="%(asctime)s - %(levelname)s - [%(name)s] - %(threadName)s - %(message)s",
     handlers=[
-        ThreadSafeHandler(LOG_FILE),
+        logging.FileHandler(LOG_FILE,mode='a', encoding='utf-8'),
         logging.StreamHandler(sys.stdout),
     ],
 )
