@@ -1,0 +1,9 @@
+.env
+core/credentials.json
+core/token.json
+.venv/
+config/
+db/
+data/
+core/db
+core/data

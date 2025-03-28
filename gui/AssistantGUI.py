@@ -1,0 +1,960 @@
+from PyQt5.QtCore import QObject, QThread
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
+from config import JARVIS_DIR
+from gui.user_setting import UserDialog
+from gui.settings import AndroidSettingsDialog
+from gui.AssistantOpenGLWidget import AssistantOpenGLWidget
+from config import SESSION_PATH
+import pyaudio
+import pvporcupine
+import json
+import threading
+from utils.models.users import Users
+import struct
+import speech_recognition as sr
+from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from gui.Home import HomeDialog
+from gui.call import CallDialerDialog
+from core.personal_assistant import YahooFinanceTool, DatabaseTool
+from PyQt5.QtGui import QKeySequence
+from gui.integrations import IntegrationsDialog
+
+from PyQt5.QtCore import QVariantAnimation, pyqtProperty, pyqtSignal, QAbstractAnimation
+from PyQt5.QtGui import QColor, QPainter, QBrush, QPen, QLinearGradient, QConicalGradient, QFont
+from PyQt5.QtWidgets import (
+    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox
+)
+import os
+from config import SRC_LOG_LEVELS, stop_event, loggers
+import sounddevice as sd
+from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
+import torch
+import pyttsx4
+import io
+import numpy as np
+import psutil
+import socket
+import netifaces
+import pyautogui
+import time
+import requests
+import cv2
+from core.brain import MemorySettings
+from PIL import Image
+
+if torch.cuda.is_available():
+    tts = Indic_Parler_TTS()
+else:
+    tts = pyttsx4.init()
+log = loggers["GUI"]
+
+
+class HoverButton(QPushButton):
+    """Button with hover animations."""
+
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setFixedSize(120, 40)
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #282c34;
+                color: white;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: bold;
+                border: 2px solid #444;
+            }
+            QPushButton:hover {
+                background-color: #00ffcc;
+                color: black;
+            }
+        """)
+
+
+class SecurityIndicator(QWidget):
+    """Circular security status indicator (Green=Secure, Red=Threat)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(80, 80)
+        self._status = False
+        self._opacity = 1.0
+
+    def set_status(self, active):
+        """Change security status."""
+        self._status = active
+        self.update()
+
+    def paintEvent(self, event):
+        """Draw indicator with neumorphic effect."""
+        painter = QPainter(self)
+        painter.setOpacity(self._opacity)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Background (Soft UI effect)
+        painter.setBrush(QColor(40, 40, 40))
+        painter.drawEllipse(0, 0, 80, 80)
+
+        # Status indicator
+        color = QColor(0, 255, 0) if self._status else QColor(255, 0, 0)
+        painter.setBrush(color)
+        painter.drawEllipse(20, 20, 40, 40)
+
+
+class SecurityRingVisual(QWidget):
+    """Circular ring visualizing security threat levels."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(200, 200)
+        self.threat_level = 0  # 0 to 100%
+
+    def set_threat_level(self, level):
+        """Set new threat level (0-100)."""
+        self.threat_level = level
+        self.update()
+
+    def paintEvent(self, event):
+        """Render circular security meter with gradient."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Background Ring
+        painter.setPen(QPen(QColor(60, 60, 60), 8))
+        painter.drawEllipse(10, 10, 180, 180)
+
+        # Dynamic Threat Level Arc
+        gradient = QConicalGradient(100, 100, -90)
+        gradient.setColorAt(0, QColor(0, 255, 0))  # Green
+        gradient.setColorAt(0.7, QColor(255, 255, 0))  # Yellow
+        gradient.setColorAt(1, QColor(255, 0, 0))  # Red
+
+        painter.setPen(QPen(gradient, 8))
+        span = int(5760 * (self.threat_level / 100))
+        painter.drawArc(10, 10, 180, 180, 1440, span)
+
+
+class ThreatVisualization(QWidget):
+    """Pulsing threat visualization when a new threat is detected."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.alert_animation = QVariantAnimation()
+        self.alert_animation.valueChanged.connect(self.update)
+
+    def pulse_alert(self):
+        """Trigger pulse animation on threat detection."""
+        self.alert_animation.stop()
+        self.alert_animation.setDuration(1000)
+        self.alert_animation.setStartValue(0)
+        self.alert_animation.setEndValue(1)
+        self.alert_animation.start()
+
+    def paintEvent(self, event):
+        """Draw pulsing ring effect for threat alert."""
+        if self.alert_animation.state() == QAbstractAnimation.Running:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            alpha = int(100 * self.alert_animation.currentValue())
+            radius = 50 + 20 * self.alert_animation.currentValue()
+
+            painter.setPen(QPen(QColor(255, 68, 68, alpha), 3))
+            painter.drawEllipse(self.rect().center(), radius, radius)
+
+
+class SecurityDashboard(QWidget):
+    """Main security dashboard widget."""
+    threatDetected = pyqtSignal(dict)
+    statusChanged = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        # Header
+        self.status_header = QLabel("🛡️ Quantum Security Shield")
+        self.status_header.setStyleSheet("font-size: 18px; color: #00ffff; font-weight: bold;")
+
+        # Real-time Stats
+        stats_layout = QHBoxLayout()
+        self.threat_count = QLabel("0 Threats Blocked")
+        self.last_scan = QLabel("Last Scan: Never")
+        stats_layout.addWidget(self.threat_count)
+        stats_layout.addWidget(self.last_scan)
+
+        # Security Indicator
+        self.security_ring = SecurityRingVisual()
+
+        # Controls
+        control_layout = QHBoxLayout()
+        self.quick_scan_btn = HoverButton("🚀 Quick Scan")
+        self.full_scan_btn = HoverButton("🛑 Full Scan")
+        control_layout.addWidget(self.quick_scan_btn)
+        control_layout.addWidget(self.full_scan_btn)
+
+        layout.addWidget(self.status_header)
+        layout.addLayout(stats_layout)
+        layout.addWidget(self.security_ring)
+        layout.addLayout(control_layout)
+
+        self.setLayout(layout)
+        self.setStyleSheet("""
+            background-color: rgba(40, 40, 40, 220);
+            border-radius: 15px;
+            border: 2px solid #505050;
+        """)
+
+
+class AnimatedButton(QPushButton):
+    """Custom Button with Moving Light Border Effect."""
+
+    def __init__(self, icon_path, parent=None):
+        super().__init__(parent)
+        self.setIcon(QIcon(icon_path))
+        self.setIconSize(self.size())
+        self.setStyleSheet(
+            """
+            QPushButton {
+                /*background-color: rgba(0, 0, 0, 0);   Fully transparent background */
+                border: 2px solid transparent;
+                border-radius: 30px;  /* Circular button */
+            }
+            QPushButton:hover {
+                border: 2px solid rgba(255, 255, 255, 0.5); /* Semi-transparent on hover */
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.1);  /* Subtle press effect */
+            }
+            """
+        )
+        self.light_position = 0
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self.update_light_position)
+        self.animation_timer.start(50)  # Adjust for speed of light movement
+
+    def update_light_position(self):
+        """Update light position for moving border."""
+        self.light_position += 1
+        if self.light_position >= 360:
+            self.light_position = 0
+        self.update()
+
+    def paintEvent(self, event):
+        """Custom painting for the moving light effect."""
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        gradient = QLinearGradient(self.rect().center(), self.rect().topLeft())
+        gradient.setColorAt(0, QColor(0, 191, 255, 150))  # Soft blue
+        gradient.setColorAt(1, QColor(255, 255, 255, 0))  # Transparent
+
+        brush = QBrush(gradient)
+        painter.setBrush(brush)
+
+        angle = self.light_position
+        painter.drawEllipse(self.rect().adjusted(3, 3, -3, -3))  # Adjust for the border
+        painter.rotate(angle)
+
+
+class AnimatedLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFont(QFont("Arial", 18, QFont.Bold))
+        self.setStyleSheet("color: rgba(10, 10, 10, 0.0);")  # Initially transparent
+        self._opacity = 0.0
+
+        # Fade-in Animation
+        self.fade_in_animation = QPropertyAnimation(self, b"opacity")
+        self.fade_in_animation.setDuration(1000)  # 1 second
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+
+        # Fade-out Animation
+        self.fade_out_animation = QPropertyAnimation(self, b"opacity")
+        self.fade_out_animation.setDuration(1000)  # 1 second
+        self.fade_out_animation.setStartValue(1.0)
+        self.fade_out_animation.setEndValue(0.0)
+
+    def start_fade_animation(self, text):
+        """Set text and start the fade-in and fade-out animation."""
+        self.setText(text)
+        self.fade_in_animation.start()
+        self.fade_in_animation.finished.connect(self.fade_out_animation.start)
+
+    def get_opacity(self):
+        return self._opacity
+
+    def set_opacity(self, value):
+        """Update opacity effect."""
+        self._opacity = value
+        self.setStyleSheet(f"color: rgba(10, 10, 10, {value});")
+
+    opacity = pyqtProperty(float, get_opacity, set_opacity)
+
+
+class WakeWordWorker(QObject):
+    wake_word_detected = pyqtSignal()
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, porcupine, audio_stream, stop_event):
+        super().__init__()
+        self.porcupine = porcupine
+        self.audio_stream = audio_stream
+        self.stop_event = stop_event
+
+    def run(self):
+        try:
+            log.info("Listening for wake word...")
+            while not self.stop_event.is_set():
+                pcm = self.audio_stream.read(self.porcupine.frame_length, exception_on_overflow=False)
+                pcm = struct.unpack("h" * self.porcupine.frame_length, pcm)
+                result = self.porcupine.process(pcm)
+                if result >= 0:
+                    self.wake_word_detected.emit()
+        except Exception as e:
+            self.error_signal.emit(str(e))
+        finally:
+            self.cleanup()
+
+    def cleanup(self):
+        if self.porcupine:
+            self.porcupine.delete()
+        if self.audio_stream:
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+
+
+class SpeechRecognitionWorker(QObject):
+    listen_signal = pyqtSignal(str)
+    transcription_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, recognizer: sr.Recognizer(), microphone: sr.Microphone(), stop_event):
+        super().__init__()
+        self.recognizer = recognizer
+        self.microphone = microphone
+        self.stop_event = stop_event
+        self.log = loggers["AUDIO"]
+
+    def capture_with_vad(self, source):
+        audio_data = []
+        energy_threshold = 300
+        silence_duration = 2
+        silence_counter = 0
+
+        while not self.stop_event.is_set():
+            try:
+                frame = source.stream.read(1024)
+                pcm_data = np.frombuffer(frame, dtype=np.int16)
+                energy = np.sqrt(np.mean(pcm_data ** 2))
+
+                if energy > energy_threshold:
+                    audio_data.append(frame)
+                    silence_counter = 0
+                else:
+                    silence_counter += 1
+
+                if silence_counter > silence_duration * (source.SAMPLE_RATE / 1024):
+                    break
+            except Exception as e:
+                self.error_signal.emit(f"Error during audio capture: {e}")
+                return None
+
+        return sr.AudioData(b''.join(audio_data), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
+
+    def run(self):
+        try:
+            with self.microphone as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=5)
+                self.listen_signal.emit("Listening...")
+                # Use VAD instead of recognizer.listen for consistency
+                audio = self.recognizer.listen(source)
+                if audio:
+                    self.listen_signal.emit("Recognizing...")
+                    transcription = self.recognizer.recognize_whisper(audio, model="base")
+                    self.log.info(f"Transcription: {transcription}")
+                    self.transcription_signal.emit(transcription)
+                else:
+                    self.error_signal.emit("No audio captured.")
+        except sr.UnknownValueError:
+            self.log.error("Sorry, I didn't catch that.")
+            self.error_signal.emit("Sorry, I didn't catch that.")
+        except sr.RequestError as e:
+            self.log.error(f"API error: {e}")
+            self.error_signal.emit(f"API error: {e}")
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
+class AgentWorker(QObject):
+    response_signal = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.text = None
+
+    def set_text(self, text):
+        self.text = text
+
+    def run(self):
+        from core.brain import get_agent
+        from core.Agent_models import get_model_from_database
+        if self.text is None:
+            self.response_signal.emit("Error: No input provided.")
+            return
+
+        log.info(f"Processing input: {self.text}")
+        if get_model_from_database():
+            try:
+                response = get_agent(user_input=self.text)
+                log.info(f"Agent Response: {response}")
+                self.response_signal.emit(response)
+            except Exception as e:
+                self.response_signal.emit(f"Error: {str(e)}")
+        else:
+            self.response_signal.emit("Please configure the model in settings.")
+
+
+# Qt-based Alert Checker
+class AlertCheck(QObject):
+    alert_triggered = pyqtSignal(list)  # Signal to emit triggered alerts
+
+    def __init__(self, db_tool, yahoo_tool, parent=None):
+        super().__init__(parent)
+        self.db_tool = db_tool
+        self.yahoo_tool = yahoo_tool
+        self.running = False
+
+    def run(self):
+        from core.personal_assistant import EXCHANGE_RATES
+        self.running = True
+        while self.running:
+            user_currency_result = self.db_tool._run("get_preference", key="currency", default="USD")
+            user_currency = user_currency_result if user_currency_result in EXCHANGE_RATES else "USD"
+            rate_to_usd = EXCHANGE_RATES[user_currency]
+            alerts = json.loads(self.db_tool._run("get_alerts"))
+            purchases = json.loads(self.db_tool._run("get_purchases_for_alerts"))
+            triggered = []
+            for ticker, target_price, alert_currency in alerts:
+                data = json.loads(self.yahoo_tool._run(ticker))
+                if "price" in data:
+                    usd_price = data["price"]
+                    alert_price_in_usd = target_price / EXCHANGE_RATES.get(alert_currency, 1.0)
+                    if usd_price >= alert_price_in_usd:
+                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
+                        triggered.append(
+                            f"Alert: {data['company']} ({ticker}) is at {user_currency}{converted_price:.2f}, hit your target of {alert_currency}{target_price}")
+                        self.db_tool._run("log_notification",
+                                          message=f"Alert triggered for {ticker} at {user_currency}{converted_price:.2f}")
+            for ticker, purchase_price, quantity, purchase_currency in purchases:
+                data = json.loads(self.yahoo_tool._run(ticker))
+                if "price" in data:
+                    usd_price = data["price"]
+                    purchase_price_usd = purchase_price / EXCHANGE_RATES.get(purchase_currency, 1.0)
+                    target_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_target_profit", default=0))
+                    min_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_min_profit", default=0))
+                    profit_usd = (usd_price - purchase_price_usd) * quantity
+                    target_price_usd = purchase_price_usd + target_profit
+                    if usd_price >= target_price_usd and profit_usd >= min_profit:
+                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
+                        converted_profit = profit_usd * EXCHANGE_RATES[user_currency]
+                        triggered.append(
+                            f"Reminder: {data['company']} ({ticker}) bought at {purchase_currency}{purchase_price} is now {user_currency}{converted_price:.2f}. Selling yields profit of {user_currency}{converted_profit:.2f} (≥ {user_currency}{min_profit}).")
+                        self.db_tool._run("log_notification",
+                                          message=f"Profit reminder for {ticker}: {user_currency}{converted_profit:.2f}")
+            if triggered:
+                self.alert_triggered.emit(triggered)
+            QThread.msleep(10000)  # Sleep for 10 seconds (in milliseconds)
+
+    def stop(self):
+        self.running = False
+
+
+class TTSWorker(QObject):
+    finished_signal = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.text = None
+
+    def set_text(self, text):
+        self.text = text
+
+    def run(self):
+        if self.text is None:
+            self.finished_signal.emit()
+            return
+
+        if stop_event.is_set():
+            sd.stop()
+            stop_event.clear()
+
+        log.info(f"Speaking: {self.text}")
+        try:
+            if torch.cuda.is_available():
+                audio, sample_rate = tts.run(self.text)  # Assuming tts.run is defined elsewhere
+                sd.play(data=audio, samplerate=sample_rate)
+                sd.wait(ignore_errors=True)
+                sd.stop()
+            else:
+                # tts.setProperty("speaker_wav","")
+                tts.say(self.text)
+                tts.runAndWait()
+        except Exception as e:
+            log.error(f"TTS error: {e}")
+        finally:
+            self.finished_signal.emit()
+
+
+# Main Window
+class AssistantGUI(QMainWindow):
+    def __init__(self, login_page):
+        super().__init__()
+        self.setGeometry(100, 100, 800, 800)
+        self.setWindowTitle("J.A.R.V.I.S.")
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  # Changed to OnTop for usability
+        self.recognition_running = False
+        self.stop_recognition = threading.Event()
+        self.login_page = login_page
+        self.porcupine = None
+        self.audio_stream = None
+        self.recognizer = sr.Recognizer()
+        self.microphone = sr.Microphone()
+
+        self.init_ui()
+        self.load_wake_word_configuration()
+
+        self.text_label = AnimatedLabel(self)
+        self.text_label.setGeometry(10, 700, 780, 40)
+        self.text_label.setAlignment(Qt.AlignCenter)
+        self.text_label.setStyleSheet("color: rgba(10, 10, 10, 0.9); font-size: 18px;")
+        self.text_label.setFont(QFont("Arial", 18, QFont.Bold))
+        self.text_label.start_fade_animation("Hello, I am JARVIS")
+
+        self.security_dashboard = SecurityDashboard(self)
+        self.security_dashboard.setGeometry(20, 150, 610, 200)
+
+        self.tray = QSystemTrayIcon()
+        self.tray.setIcon(QIcon("icon.png"))  # Replace with your icon path
+        self.tray.setVisible(True)
+        self.tray_menu = QMenu()
+        self.tray.setContextMenu(self.tray_menu)
+        if self.audio_stream is not None:
+            self.wake_word_thread = QThread()
+            self.wake_word_worker = WakeWordWorker(self.porcupine, self.audio_stream, self.stop_recognition)
+            self.wake_word_worker.moveToThread(self.wake_word_thread)
+            self.wake_word_worker.wake_word_detected.connect(self.on_wake_word_detected)
+            self.wake_word_worker.error_signal.connect(self.display_error)
+            self.wake_word_thread.started.connect(self.wake_word_worker.run)
+            self.wake_word_thread.start()
+
+        self.speech_thread = QThread()
+        self.speech_worker = SpeechRecognitionWorker(self.recognizer, self.microphone, self.stop_recognition)
+        self.speech_worker.moveToThread(self.speech_thread)
+        self.speech_worker.transcription_signal.connect(self.start_agent_processing)
+        self.speech_worker.listen_signal.connect(self.display_error)
+        self.speech_worker.error_signal.connect(self.display_error)
+        self.speech_thread.started.connect(self.speech_worker.run)
+
+        self.agent_thread = QThread()
+        self.agent_worker = AgentWorker()
+        self.agent_worker.moveToThread(self.agent_thread)
+        self.agent_worker.response_signal.connect(self.start_tts)
+        self.agent_thread.started.connect(self.agent_worker.run)
+        # Note: started signal not connected directly to run due to parameter issue
+
+        self.tts_thread = QThread()
+        self.tts_worker = TTSWorker()
+        self.tts_worker.moveToThread(self.tts_thread)
+        self.tts_worker.finished_signal.connect(self.tts_finished)
+        self.tts_thread.started.connect(self.tts_worker.run)
+        # Note: started signal not connected directly to run due to parameter issue
+
+        self.db_tool = DatabaseTool()
+        self.yahoo_tool = YahooFinanceTool()
+
+        # Set up the worker and thread
+        self.alert_thread = QThread()
+        self.alert_checker = AlertCheck(self.db_tool, self.yahoo_tool)
+        self.alert_checker.moveToThread(self.alert_thread)
+
+        # Connect signals
+        self.alert_thread.started.connect(self.alert_checker.run)
+        self.alert_checker.alert_triggered.connect(self.handle_alerts)
+
+        # Start the thread
+        self.alert_thread.start()
+
+    def handle_alerts(self, alerts):
+        # Show notification and play TTS
+        self.start_tts("You have a new notification")
+        for alert in alerts:
+            self.tray.showMessage("J.A.R.V.I.S. Alert", alert, QSystemTrayIcon.Information, 5000)
+            self.start_tts(alert)
+            QThread.msleep(1000)  # Small delay to avoid overlapping TTS
+
+    def center_window(self):
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
+
+    def display_error(self, error_message):
+        """Display errors."""
+        log.info(error_message)
+        self.display_text(error_message)
+
+    def load_wake_word_configuration(self):
+        """Load configuration for wake word detection."""
+        try:
+            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
+                data = json.load(f)
+            if "email" in data:
+                user = Users.get_user_by_email(data["email"])
+                if user and user.settings:
+                    settings = json.loads(user.settings.json())
+                    wakeword_config = settings.get("wakeword", {})
+                    self.api_key = wakeword_config.get("api_key", "")
+                    self.wake_word_engine = wakeword_config.get("wakeword_engine", "")
+                    model_path = wakeword_config.get("model_path", "")
+
+                    if "porcupine" in self.wake_word_engine and self.api_key:
+                        self.initialize_porcupine(self.api_key, model_path)
+        except Exception as e:
+            log.info(f"Failed to load wake word configuration: {e}")
+
+    def initialize_porcupine(self, api_key, model_path):
+        """Initialize Porcupine with the provided API key and model path."""
+        try:
+            self.porcupine = pvporcupine.create(
+                access_key=api_key,
+                keyword_paths=[model_path] if model_path else None,
+                keywords=["jarvis"] if not model_path else None,
+            )
+            self.audio_stream = pyaudio.PyAudio().open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=self.porcupine.sample_rate,
+                input=True,
+                frames_per_buffer=self.porcupine.frame_length,
+            )
+        except Exception as e:
+            log.info(f"Failed to initialize Porcupine: {e}")
+            self.porcupine = None
+
+    def stop_interaction_animation(self):
+        """Stop animation after interaction ends."""
+        if self.gl_widget.animation_running:
+            self.gl_widget.toggle_animation()
+            self.record_button.setIcon(QIcon(os.path.join(JARVIS_DIR, "icons", "mic-off.svg")))
+
+    def init_ui(self):
+        """Initialize the main user interface with 3D transparent buttons and lighting effects."""
+        # OpenGL Widget
+        self.gl_widget = AssistantOpenGLWidget(self)
+        self.gl_widget.light_mode = False
+        self.setCentralWidget(self.gl_widget)
+
+        # Transcription/Response Label
+        self.text_label = AnimatedLabel(self)
+        self.text_label.setGeometry(10, 700, 780, 40)
+        self.text_label.setAlignment(Qt.AlignCenter)
+
+        # Buttons Configuration
+        button_config = [
+            {
+                "name": "record_button",
+                "geometry": (20, 20, 60, 60),
+                "icon": "mic-off.svg",
+                "callback": self.record,
+                "tooltip": "Start/Stop Recording",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_M)
+            },
+            {
+                "name": "integrations_button",
+                "geometry": (100, 20, 60, 60),
+                "icon": "system-integration.svg",
+                "callback": self.change_color,
+                "tooltip": "Integration",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C)
+            },
+            {
+                "name": "settings_button",
+                "geometry": (180, 20, 60, 60),
+                "icon": "settings.svg",
+                "callback": self.open_settings_dialog,
+                "tooltip": "Open Settings",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_S)
+            },
+            {
+                "name": "users_button",
+                "geometry": (260, 20, 60, 60),
+                "icon": "user.svg",
+                "callback": self.open_users_dialog,
+                "tooltip": "Manage Users",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_F1)
+            },
+            {
+                "name": "home_button",
+                "geometry": (340, 20, 60, 60),
+                "icon": "home.svg",
+                "callback": self.home_application,
+                "tooltip": "Home",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_M)
+            },
+            {
+                "name": "call_button",
+                "geometry": (420, 20, 60, 60),
+                "icon": "phone.svg",
+                "callback": self.call_application,
+                "tooltip": "Call Window",
+                "key": QKeySequence(Qt.CTRL + Qt.Key_C)
+            },
+            {
+                "name": "close_button",
+                "geometry": (500, 20, 60, 60),
+                "icon": "close.svg",
+                "callback": self.closeapplication,
+                "tooltip": "Close Application",
+                "key": QKeySequence(Qt.Key.Key_Alt + Qt.Key_F4)
+            },
+        ]
+
+        for config in button_config:
+            icon_path = os.path.join(JARVIS_DIR, "icons", config["icon"])
+            button = AnimatedButton(icon_path, self)
+            button.setGeometry(*config["geometry"])
+            button.clicked.connect(config["callback"])
+            button.setShortcut(config['key'])
+            button.setToolTip(f"{config.get("tooltip", "")} ({config['key'].toString()})")
+
+            # Add moving light effect on hover
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setColor(QColor(0, 191, 255))  # Blue shadow
+            shadow.setBlurRadius(20)
+            shadow.setOffset(0, 0)
+            button.setGraphicsEffect(shadow)
+
+            setattr(self, config["name"], button)
+
+        # Enable the window to be resized
+        self.setFixedSize(650, 800)  # Adjust size if needed
+        self.center_window()
+        self.show()
+
+    def update_security_indicator(self, status):
+        """Update Security Indicator based on System Status"""
+        self.security_indicator.set_status(status['active'])
+        self.animate_security_indicator(status['active'])
+
+    def animate_security_indicator(self, active):
+        """Add Fade Effect on Security Indicator"""
+        animation = QPropertyAnimation(self.security_indicator, b"opacity")
+        animation.setDuration(500)
+        animation.setStartValue(0.5 if active else 1.0)
+        animation.setEndValue(1.0 if active else 0.5)
+        animation.start()
+
+    def handle_threat(self, threat_info):
+        """Handle Detected Threats"""
+        self.text_label.start_fade_animation(f"⚠️ Threat Detected: {threat_info['file_path']}")
+        self.text_label.setStyleSheet("color: #ff4444; font-weight: bold;")
+
+    def on_wake_word_detected(self):
+        """Handle wake word detection."""
+        log.info("Wake word detected!")
+        self.start_animation()
+        if not self.recognition_running:
+            self.recognition_running = True
+            self.wake_word_thread.quit()
+            self.speech_thread.start()  # Start speech recognition
+
+    def start_agent_processing(self, transcription):
+        """Handle transcription results."""
+        log.info(f"Transcription: {transcription}")
+        self.display_text(f"You said: {transcription}")
+        if not self.agent_thread.isRunning():
+            print("Agent is started!")
+            self.agent_worker.set_text(transcription)
+            self.agent_thread.start()
+
+    def start_tts(self, text):
+        """Starts the TTS (Text-to-Speech) thread."""
+        self.display_text(f"J.A.R.V.I.S.: {text}")
+        if not self.tts_thread.isRunning():
+            self.tts_worker.set_text(text)
+            self.tts_thread.start()
+
+    def tts_finished(self):
+        """Handles completion of TTS playback."""
+        self.tts_thread.quit()
+        self.tts_thread.wait()
+        self.agent_thread.quit()
+        self.agent_thread.wait()
+        self.speech_thread.quit()
+        self.speech_thread.wait()
+        self.stop_interaction_animation()
+
+    def record(self):
+        self.gl_widget.toggle_animation()
+        if self.gl_widget.animation_running and not self.recognition_running:
+            try:
+                self.stop_recognition.clear()
+                self.recognition_running = True
+                mic_svg = os.path.join(JARVIS_DIR, "icons", "mic.svg")
+                self.record_button.setIcon(QIcon(mic_svg))
+                self.speech_thread.start()
+            except Exception as e:
+                self.display_error(f"Failed to start recording: {e}")
+                self.recognition_running = False
+        else:
+            try:
+                if hasattr(self, 'speech_thread') and self.speech_thread.isRunning():
+                    self.stop_recognition.set()
+                    self.recognition_running = False
+                    mic_svg = os.path.join(JARVIS_DIR, "icons", "mic-off.svg")
+                    self.record_button.setIcon(QIcon(mic_svg))
+                    self.speech_thread.quit()
+                    self.speech_thread.wait()
+            except Exception as e:
+                self.display_error(f"Failed to stop recording: {e}")
+
+    def change_color(self):
+        dialog = IntegrationsDialog(self)
+        dialog.exec_()
+
+    def get_user_face_from_database(self):
+        from utils.models.users import Users
+        import json
+        session_path = os.path.join(SESSION_PATH, "session.json")
+        with open(session_path, "r") as f:
+            data = json.load(f)
+        if "email" in data:
+            users = Users.get_user_by_email(data['email'])
+            return users.user_face
+
+    def get_face(self):
+        import cv2
+        import numpy as np
+
+        # Open the default camera (index 0)
+        cap = cv2.VideoCapture(0)
+
+        # Check if the camera is opened
+        if not cap.isOpened():
+            print("Cannot open camera")
+            return None
+        # Read a frame from the camera
+        ret, frame = cap.read()
+
+        # Release the camera
+        cap.release()
+
+        # Convert the frame to a NumPy ndarray
+        image_ndarray = np.array(frame)
+
+        return image_ndarray
+
+    def open_settings_dialog(self):
+        from deepface import DeepFace
+        image = self.get_face()
+        if image is not None:
+            verify = DeepFace.verify(img1_path=image, img2_path=self.get_user_face_from_database(),
+                                     enforce_detection=False)
+            if verify['verified']:
+                dialog = AndroidSettingsDialog(self)
+                dialog.exec_()
+        else:
+            QMessageBox(self, "Camera", "Cannot open camera")
+
+        # If the session file is removed, go back to login
+        if not os.path.exists(os.path.join(SESSION_PATH, "session.json")):
+            self.login_page()
+
+    def open_users_dialog(self):
+        dialog = UserDialog(self)
+        dialog.exec_()
+
+    def home_application(self):
+        """Open the home page dialog."""
+        dialog = HomeDialog(self)
+        dialog.exec_()
+
+    def call_application(self):
+        """Open the Call page dialog."""
+        dialog = CallDialerDialog(self)
+        dialog.exec_()
+
+    def closeapplication(self):
+        QApplication.quit()  # Close the application
+
+    def start_animation(self):
+        """Start the animation."""
+        if not self.gl_widget.animation_running:
+            self.gl_widget.toggle_animation()
+            mic_svg = os.path.join(JARVIS_DIR, "icons", "mic.svg")
+            self.record_button.setIcon(QIcon(mic_svg))  # Update icon for running animation
+
+    def closeEvent(self, event):
+        """Handle window close event."""
+        self.stop_recognition.set()
+        self.alert_checker.stop()
+        if self.audio_stream is not None:
+            self.wake_word_thread.quit()
+            self.wake_word_thread.wait()
+        self.speech_thread.quit()
+        self.speech_thread.wait()
+        self.alert_thread.quit()
+        self.alert_thread.wait()
+        event.accept()
+
+    def display_text(self, text):
+        """Display text with animations and auto-clear."""
+        print(text)
+        self.animate_text_in(text)
+
+        # Delay the fade-out animation
+        QTimer.singleShot(2000, self.animate_text_out)  # Show text for 2 seconds before fading out
+
+    def animate_text_in(self, text):
+        """Fade in text with animation."""
+        self.text_label.setText(text)  # Update the text
+        self.text_label.show()  # Ensure the label is visible
+
+        # Fade in animation
+        fade_in = QPropertyAnimation(self.text_label, b"opacity")
+        fade_in.setDuration(800)
+        fade_in.setStartValue(0)
+        fade_in.setEndValue(1)
+        fade_in.setEasingCurve(QEasingCurve.OutBack)
+        fade_in.start()
+
+    def animate_text_out(self):
+        """Fade out text with animation."""
+        # Fade out animation
+        fade_out = QPropertyAnimation(self.text_label, b"opacity")
+        fade_out.setDuration(800)
+        fade_out.setStartValue(1)
+        fade_out.setEndValue(0)
+        fade_out.setEasingCurve(QEasingCurve.InBack)
+
+        # Clear the text after the animation completes
+        def clear_text():
+            self.text_label.clear()
+            self.text_label.hide()  # Hide the label to ensure it doesn't remain visible
+
+        fade_out.finished.connect(clear_text)
+        fade_out.start()
