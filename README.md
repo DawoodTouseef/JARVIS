@@ -28,19 +28,6 @@ This application is production-ready, leveraging modern technologies like PyQt5,
 - **Hardware**: Microphone, webcam (optional for camera feed)
 - **Dependencies**: Listed in `requirements.txt`
 
-### Steps
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/DawoodTouseef/JARVIS.git
-   cd jarvis
-   ````
-2. **Set Up a Virtual Environment** (Recommended):
-    ```bash
-   python -m venv venv
-    source venv/bin/activate # On Windows: venv\Scripts\activate
-   ````
-
 ### Usage
 
 1. Launch JARVIS:
