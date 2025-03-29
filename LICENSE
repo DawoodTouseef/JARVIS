@@ -1,40 +1,78 @@
-Custom Open-Source License (COSL)
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
 
-1. Grant of License
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-This software is provided as an open-source project. You are granted a non-exclusive, worldwide, royalty-free license to use, modify, and contribute to the software, subject to the following terms:
+1. Definitions.
 
-2. Permitted Uses
+   "License" shall mean the terms and conditions for use, reproduction, and
+   distribution as defined by Sections 1 through 9 of this document.
 
-You may use, modify, and distribute your modified version of the software within your organization or for personal use.
+   "Licensor" shall mean the copyright owner or entity authorized by the
+   copyright owner that is granting the License.
 
-Contributions to the project are welcome, provided they comply with the terms of this license.
+   "Legal Entity" shall mean the union of the acting entity and all other
+   entities that control, are controlled by, or are under common control with
+   that entity.
 
-3. Prohibited Uses
+   "You" (or "Your") shall mean an individual or Legal Entity exercising
+   permissions granted by this License.
 
-Unauthorized Redistribution: You may NOT distribute, resell, sublicense, or otherwise make the software available to any third party in any form without prior written permission from the original author(s).
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation source,
+   and configuration files.
 
-Modification & Redistribution: You may modify the software for personal or internal use, but you are prohibited from distributing modified or unmodified copies outside your organization.
+   "Object" form shall mean any form resulting from mechanical transformation
+   or translation of a Source form, including but not limited to compiled
+   object code, generated documentation, and conversions to other media types.
 
-Commercial Exploitation: Using this software to create a competing or commercially sold product is strictly prohibited.
+   "Work" shall mean the work of authorship made available under this License.
 
-4. Legal Enforcement
+   "Derivative Works" shall mean any work that is based on (or derived from)
+   the Work and in which the original Work remains a part.
 
-Any individual or organization found redistributing this software in violation of this license will be subject to legal action under applicable copyright laws.
+   "Contribution" shall mean any work submitted for inclusion in the Work
+   by the copyright owner or authorized contributor.
 
-The author(s) and contributors reserve the right to pursue financial and legal penalties against any entity found in breach of this agreement.
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   who submits a Contribution.
 
-5. Disclaimer of Warranty
+2. Grant of Copyright License.
 
-THIS SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
+   Subject to the terms and conditions of this License, each Contributor
+   grants You a worldwide, royalty-free, non-exclusive, irrevocable license
+   to reproduce, prepare Derivative Works of, publicly display, publicly
+   perform, sublicense, and distribute the Work and Derivative Works.
 
-6. Termination
+3. Grant of Patent License.
 
-Any violation of the above terms will result in immediate termination of this license, and legal action may be taken.
+   Each Contributor grants You a license to their patent rights covering
+   their Contributions.
 
-7. Governing Law
+4. Redistribution.
 
-This license shall be governed by and construed in accordance with the laws of the jurisdiction in which the original author(s) reside.
+   You may reproduce and distribute copies of the Work, provided that:
+   - You provide a copy of this License.
+   - You include the required notices and disclaimers.
+   - You do not use trademarks from the Work without permission.
 
-By using this software, you agree to abide by the terms of this license.
+5. Submission of Contributions.
 
+   Contributors grant the Licensor a license to use their Contributions under
+   this License.
+
+6. Disclaimer of Warranty.
+
+   The Work is provided "AS IS", without warranties or conditions of any kind.
+
+7. Limitation of Liability.
+
+   The Licensor and Contributors shall not be liable for any damages resulting
+   from use of the Work.
+
+8. Accepting the License.
+
+   By using the Work, You agree to all terms of this License.
+
+END OF TERMS AND CONDITIONS
