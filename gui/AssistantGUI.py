@@ -24,25 +24,21 @@ from gui.integrations import IntegrationsDialog
 from PyQt5.QtCore import QVariantAnimation, pyqtProperty, pyqtSignal, QAbstractAnimation
 from PyQt5.QtGui import QColor, QPainter, QBrush, QPen, QLinearGradient, QConicalGradient, QFont
 from PyQt5.QtWidgets import (
-    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox
+    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox,  QDialog
 )
 import os
-from config import SRC_LOG_LEVELS, stop_event, loggers
+from config import  stop_event, loggers
 import sounddevice as sd
 from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
 import torch
 import pyttsx4
-import io
 import numpy as np
 import psutil
-import socket
 import netifaces
-import pyautogui
-import time
-import requests
+from datetime import datetime
 import cv2
-from core.brain import MemorySettings
-from PIL import Image
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import Qt
 
 if torch.cuda.is_available():
     tts = Indic_Parler_TTS()
@@ -425,26 +421,60 @@ class AgentWorker(QObject):
             self.response_signal.emit("Please configure the model in settings.")
 
 
-# Qt-based Alert Checker
+
 class AlertCheck(QObject):
-    alert_triggered = pyqtSignal(list)  # Signal to emit triggered alerts
+    alert_triggered = pyqtSignal(list)  # Signal to emit triggered alerts (stock and system)
 
     def __init__(self, db_tool, yahoo_tool, parent=None):
         super().__init__(parent)
         self.db_tool = db_tool
         self.yahoo_tool = yahoo_tool
         self.running = False
+        # Thresholds for proactive system alerts (customizable via preferences if desired)
+        self.cpu_threshold = 90.0  # Alert if CPU usage > 90%
+        self.memory_threshold = 90.0  # Alert if memory usage > 90%
+        self.battery_threshold = 20.0  # Alert if battery < 20%
+        self.disk_threshold = 90.0  # Alert if disk usage > 90%
+
+    def get_system_sensors(self):
+        """Fetch system metrics using psutil."""
+        try:
+            cpu_usage = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            battery = psutil.sensors_battery()
+            return {
+                "cpu": cpu_usage,
+                "memory": memory.percent,
+                "disk": disk.percent,
+                "battery": battery.percent if battery else 100.0,  # Assume 100% if no battery
+                "power_plugged": battery.power_plugged if battery else True
+            }
+        except Exception as e:
+            return {"error": f"System monitoring failed: {str(e)}"}
+
+    def get_network_status(self):
+        """Check network connectivity using netifaces."""
+        try:
+            gateways = netifaces.gateways()
+            return "connected" if 'default' in gateways and gateways['default'] else "disconnected"
+        except Exception:
+            return "unknown"
 
     def run(self):
-        from core.personal_assistant import EXCHANGE_RATES
+        from core.personal_assistant import EXCHANGE_RATES  # Assuming EXCHANGE_RATES is defined here
         self.running = True
         while self.running:
+            triggered = []  # Collect all alerts (stock + system)
+
+            # 1. Stock Alerts (existing functionality)
             user_currency_result = self.db_tool._run("get_preference", key="currency", default="USD")
             user_currency = user_currency_result if user_currency_result in EXCHANGE_RATES else "USD"
             rate_to_usd = EXCHANGE_RATES[user_currency]
             alerts = json.loads(self.db_tool._run("get_alerts"))
             purchases = json.loads(self.db_tool._run("get_purchases_for_alerts"))
-            triggered = []
+
+            # Stock price target alerts
             for ticker, target_price, alert_currency in alerts:
                 data = json.loads(self.yahoo_tool._run(ticker))
                 if "price" in data:
@@ -453,9 +483,12 @@ class AlertCheck(QObject):
                     if usd_price >= alert_price_in_usd:
                         converted_price = usd_price * EXCHANGE_RATES[user_currency]
                         triggered.append(
-                            f"Alert: {data['company']} ({ticker}) is at {user_currency}{converted_price:.2f}, hit your target of {alert_currency}{target_price}")
+                            f"Alert: {data['company']} ({ticker}) is at {user_currency}{converted_price:.2f}, hit your target of {alert_currency}{target_price}"
+                        )
                         self.db_tool._run("log_notification",
-                                          message=f"Alert triggered for {ticker} at {user_currency}{converted_price:.2f}")
+                                        message=f"Alert triggered for {ticker} at {user_currency}{converted_price:.2f}")
+
+            # Stock profit reminders
             for ticker, purchase_price, quantity, purchase_currency in purchases:
                 data = json.loads(self.yahoo_tool._run(ticker))
                 if "price" in data:
@@ -469,16 +502,54 @@ class AlertCheck(QObject):
                         converted_price = usd_price * EXCHANGE_RATES[user_currency]
                         converted_profit = profit_usd * EXCHANGE_RATES[user_currency]
                         triggered.append(
-                            f"Reminder: {data['company']} ({ticker}) bought at {purchase_currency}{purchase_price} is now {user_currency}{converted_price:.2f}. Selling yields profit of {user_currency}{converted_profit:.2f} (≥ {user_currency}{min_profit}).")
+                            f"Reminder: {data['company']} ({ticker}) bought at {purchase_currency}{purchase_price} is now {user_currency}{converted_price:.2f}. Selling yields profit of {user_currency}{converted_profit:.2f} (≥ {user_currency}{min_profit})."
+                        )
                         self.db_tool._run("log_notification",
-                                          message=f"Profit reminder for {ticker}: {user_currency}{converted_profit:.2f}")
+                                        message=f"Profit reminder for {ticker}: {user_currency}{converted_profit:.2f}")
+
+            # 2. System Monitoring and Proactive Updates
+            sensors = self.get_system_sensors()
+            network_status = self.get_network_status()
+
+            # CPU usage alert
+            if "cpu" in sensors and sensors["cpu"] > self.cpu_threshold:
+                triggered.append(f"Warning: CPU usage at {sensors['cpu']:.1f}%, exceeding {self.cpu_threshold}% threshold.")
+                self.db_tool._run("log_notification",
+                                message=f"High CPU usage detected: {sensors['cpu']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Memory usage alert
+            if "memory" in sensors and sensors["memory"] > self.memory_threshold:
+                triggered.append(f"Warning: Memory usage at {sensors['memory']:.1f}%, exceeding {self.memory_threshold}% threshold.")
+                self.db_tool._run("log_notification",
+                                message=f"High memory usage detected: {sensors['memory']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Disk usage alert
+            if "disk" in sensors and sensors["disk"] > self.disk_threshold:
+                triggered.append(f"Warning: Disk usage at {sensors['disk']:.1f}%, exceeding {self.disk_threshold}% threshold.")
+                self.db_tool._run("log_notification",
+                                message=f"High disk usage detected: {sensors['disk']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Battery level alert (if not plugged in)
+            if "battery" in sensors and sensors["battery"] < self.battery_threshold and not sensors["power_plugged"]:
+                triggered.append(f"Warning: Battery level at {sensors['battery']:.1f}%, below {self.battery_threshold}% threshold.")
+                self.db_tool._run("log_notification",
+                                message=f"Low battery detected: {sensors['battery']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Network disconnection alert
+            if network_status == "disconnected":
+                triggered.append("Warning: Network connection lost.")
+                self.db_tool._run("log_notification",
+                                message=f"Network disconnection detected at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            # Emit all triggered alerts (stock + system)
             if triggered:
                 self.alert_triggered.emit(triggered)
-            QThread.msleep(10000)  # Sleep for 10 seconds (in milliseconds)
+
+            # Sleep for 10 seconds (consistent with stock checks)
+            QThread.msleep(10000)
 
     def stop(self):
         self.running = False
-
 
 class TTSWorker(QObject):
     finished_signal = pyqtSignal()
@@ -516,6 +587,34 @@ class TTSWorker(QObject):
             self.finished_signal.emit()
 
 
+class ImagePreviewDialog(QDialog):
+    def __init__(self, image, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Captured Image Preview")
+        self.setModal(False)  # Non-modal so code can continue
+
+        # Convert OpenCV BGR image to RGB
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Convert to QImage
+        h, w, ch = image_rgb.shape
+        bytes_per_line = ch * w
+        q_image = QImage(image_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+
+        # Create pixmap and scale it
+        pixmap = QPixmap.fromImage(q_image)
+        pixmap = pixmap.scaled(640, 480, Qt.KeepAspectRatio)
+
+        # Setup UI
+        layout = QVBoxLayout()
+        self.image_label = QLabel()
+        self.image_label.setPixmap(pixmap)
+        layout.addWidget(self.image_label)
+        self.setLayout(layout)
+
+        # Adjust window size to image
+        self.adjustSize()
+
 # Main Window
 class AssistantGUI(QMainWindow):
     def __init__(self, login_page):
@@ -524,7 +623,7 @@ class AssistantGUI(QMainWindow):
         self.setWindowTitle("J.A.R.V.I.S.")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  # Changed to OnTop for usability
+            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
         self.recognition_running = False
         self.stop_recognition = threading.Event()
         self.login_page = login_page
@@ -839,47 +938,107 @@ class AssistantGUI(QMainWindow):
     def get_user_face_from_database(self):
         from utils.models.users import Users
         import json
+        import os  # Need to import os at the top
+
         session_path = os.path.join(SESSION_PATH, "session.json")
-        with open(session_path, "r") as f:
-            data = json.load(f)
-        if "email" in data:
-            users = Users.get_user_by_email(data['email'])
-            return users.user_face
+        try:
+            with open(session_path, "r") as f:
+                data = json.load(f)
+
+            if "email" in data:
+                users = Users.get_user_by_email(data['email'])
+                return users.user_face
+            else:
+                raise ValueError("Email not found in session data")
+        except FileNotFoundError:
+            print("Session file not found")
+            return None
+        except json.JSONDecodeError:
+            print("Invalid JSON in session file")
+            return None
 
     def get_face(self):
-        import cv2
-        import numpy as np
-
         # Open the default camera (index 0)
         cap = cv2.VideoCapture(0)
+        max_attempts = 3
 
-        # Check if the camera is opened
-        if not cap.isOpened():
-            print("Cannot open camera")
-            return None
-        # Read a frame from the camera
-        ret, frame = cap.read()
+        for attempt in range(max_attempts):
+            if cap.isOpened():
+                ret, frame = cap.read()
 
-        # Release the camera
+                if ret and frame is not None:
+                    # Show the captured image
+                    preview_dialog = ImagePreviewDialog(frame, self)
+                    preview_dialog.show()
+
+                    # Release camera before returning
+                    cap.release()
+
+                    # Return the numpy array
+                    return np.array(frame)
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "Camera Error",
+                        f"Failed to capture frame, attempt {attempt + 1}/{max_attempts}"
+                    )
+                    log.critical(f"Failed to capture frame, attempt {attempt + 1}/{max_attempts}")
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Camera Error",
+                    f"Cannot open camera, attempt {attempt + 1}/{max_attempts}"
+                )
+                log.critical(f"Cannot open camera, attempt {attempt + 1}/{max_attempts}")
+                cap.release()
+                cap = cv2.VideoCapture(0)  # Try reopening
+
+            # Small delay between attempts
+            cv2.waitKey(100)
+
+        QMessageBox.critical(
+            self,
+            "Camera Error",
+            "Failed to capture image after all attempts"
+        )
+        log.critical("Failed to capture image after all attempts")
         cap.release()
-
-        # Convert the frame to a NumPy ndarray
-        image_ndarray = np.array(frame)
-
-        return image_ndarray
+        return None
 
     def open_settings_dialog(self):
         from deepface import DeepFace
+
         image = self.get_face()
-        if image is not None:
-            verify = DeepFace.verify(img1_path=image, img2_path=self.get_user_face_from_database(),
-                                     enforce_detection=False)
+        if image is None:
+                QMessageBox.critical(self, "Camera Error", "Cannot open camera")
+                return
+
+        try:
+            db_face = self.get_user_face_from_database()
+            if db_face is None:
+                    QMessageBox.critical(self, "Database Error", "Failed to retrieve user face from database")
+                    return
+
+            verify = DeepFace.verify(
+                    img1_path=image,
+                    img2_path=db_face,
+                    enforce_detection=False,
+                    model_name='Facenet512',
+                    distance_metric="cosine",
+                    align=True,
+                    detector_backend="opencv"
+                )
             if verify['verified']:
                 dialog = AndroidSettingsDialog(self)
                 dialog.exec_()
-        else:
-            QMessageBox(self, "Camera", "Cannot open camera")
-
+            else:
+                QMessageBox.warning(self, "Verification", "Face verification failed")
+                log.warning("Face verification failed")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Verification failed: {str(e)}")
+            log.critical(f"Verification failed: {str(e)}")
+            return
         # If the session file is removed, go back to login
         if not os.path.exists(os.path.join(SESSION_PATH, "session.json")):
             self.login_page()

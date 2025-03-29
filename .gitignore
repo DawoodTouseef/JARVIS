@@ -9,3 +9,5 @@ core/db
 core/data
 .idea/
 logs/
+__pycache__/
+core/__pycache__/
