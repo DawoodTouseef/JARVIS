@@ -893,7 +893,9 @@ vision_router = VisionRouter(agents)
 def router_node(state: AgentState) -> AgentState:
     state["input"] = correct_and_enhance_input(state["input"], llm)
     try:
-        state['route'] = vision_router.route(state['input']).selected_agent
+        output= vision_router.route(state['input'])
+        state['input']=output.inputs
+        state['route'] = output.selected_agent
     except Exception as e:
         logging.error(f"Routing error: {e}")
         state['route'] = "GENERAL"
@@ -1024,6 +1026,9 @@ def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> st
     return final_state["final_response"]
 
 if __name__ == "__main__":
-    input_query =  "How’s the system doing?"
-    response = get_agent(input_query)
-    print(f"JARVIS: {response}")
+    try:
+        input_query =  "what did i ask before/"
+        response = get_agent(input_query)
+        print(f"JARVIS: {response}")
+    except Exception as  e:
+        print(str(e))

@@ -1,11 +1,11 @@
-from typing import List, Literal, Deque, Dict, Type
+from typing import List
 from datetime import datetime, timedelta
 from collections import deque
 from functools import lru_cache
 import hashlib
 from langchain.prompts import ChatPromptTemplate
 from core.Agent_models import get_model
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 import logging
 from tenacity import retry, stop_after_attempt, wait_fixed
 import re
@@ -21,6 +21,7 @@ class AgentConfig(BaseModel):
 
 class RouterResponse(BaseModel):
     selected_agent: str = Field(description="Name of the selected agent")
+    inputs:str = Field(description="Described input to that Agent")
 
 class VisionRouter:
     def __init__(self, agents: List[AgentConfig], config: dict = None):
@@ -59,14 +60,13 @@ class VisionRouter:
     {agent_descriptions}
     """+"""
     Routing Rules:
-    1. Select the most appropriate agent based on the input
-    2. Never infer missing context
-    3. Respond only with the selected agent name
-    4. STRICT VISUAL REQUIREMENT: Require explicit visual references
-    5. NO CONTEXT ASSUMPTION: Never infer missing visual context 
-    6. BINARY OUTPUT: Only respond with agent name
+    1. Select the most appropriate agent based on input keywords, examples, and priority.
+    2. Prioritize planning tasks (e.g., scheduling, reminders) for the PERSONAL agent when detected.
+    3. Require explicit visual references for VISION agent; never assume visual context.
+    4. Extract specific parameters (e.g., time, date, task) for planning-related inputs.
+    5. Return JSON with agent name, tailored input.
     Response Format:
-    {{"selected_agent": "agent_name"}}"""
+    {{"selected_agent": "agent_name","inputs": "specific_input_for_agent"}}"""
 
     def extract_json(self,text: str) -> dict:
         """
@@ -171,15 +171,51 @@ if __name__ == "__main__":
         AgentConfig(
             name="GENERAL",
             description="Handles text-based questions and general knowledge",
-            examples=["Explain quantum physics", "Who invented radio?", "What is AI?"],
-            keywords=["explain", "what", "who"]
+            examples=["Explain quantum physics", "Who invented radio?", "What is AI?", "what is the weather?"],
+            keywords=["explain", "what", "who", "how", "when", "why"]
         ),
         AgentConfig(
             name="MEMORY",
             description="Handles past interactions and personalized experiences",
             examples=["What did we discuss last time?", "Based on my preferences..."],
             keywords=["remember", "preference", "last time"]
-        )
+        ),
+        AgentConfig(
+            name="PERSONAL",
+            description="Handles personal tasks like schedules, reminders, and preferences",
+            examples=["What's on my schedule today?", "Set a reminder for 5 PM", "Update my preferences"],
+            keywords=["schedule", "reminder", "preference", "personal"]
+        ),
+        AgentConfig(
+            name="TIME_DATE",
+            description="Reports current time and date",
+            examples=["What time is it?", "What’s the date today?"],
+            keywords=["time", "date"]
+        ),
+        AgentConfig(
+            name="SOFTWARE",
+            description="Manages software installation, uninstallation, and system info",
+            examples=["Install Google Chrome", "List installed software", "Update all software"],
+            keywords=["install", "uninstall", "software", "system", "update"]
+        ),
+        AgentConfig(
+            name="BROWSER",
+            description="Handles browser-related tasks like navigation and interaction",
+            examples=["Browse to Google", "Click the search button", "Fill out a form"],
+            keywords=["browse", "click", "navigate", "webpage"]
+        ),
+        AgentConfig(
+            name="SENSOR",
+            description="Handles system sensor data and state awareness",
+            examples=["What’s the CPU usage?", "How much battery is left?"],
+            keywords=["cpu", "memory", "disk", "battery", "sensor", "system state"]
+        ),
+        AgentConfig(
+            name="CONSCIOUSNESS",
+            description="Processes multimodal inputs and maintains awareness",
+            examples=["What did I say earlier?", "Describe my surroundings", "What’s happening now?"],
+            keywords=["audio", "image", "context", "aware", "surroundings"]
+        ),
     ]
     router = VisionRouter(agents)
     print(router.route("Jarvis what did i do yesterday?"))
