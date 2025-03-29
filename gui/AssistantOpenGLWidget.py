@@ -1,3 +1,17 @@
+# Copyright 2025 Dawood Thouseef
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import os.path
 import freetype
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer, QPoint
@@ -8,7 +22,7 @@ from OpenGL.GLU import *
 import random
 
 class FontRenderer:
-    def __init__(self, font_path="E:\\jarvis\\Client\\JARVIS2\\fonts\\Monomakh\\Monomakh-Regular.ttf", font_size=18):
+    def __init__(self, font_path=None, font_size=18):
         """Initialize FreeType font rendering."""
         self.face = freetype.Face(font_path)
         self.face.set_char_size(font_size * 64)
@@ -89,9 +103,9 @@ class AssistantOpenGLWidget(QOpenGLWidget):
         self.angle = 0
         self.dragging = False
         self.offset = QPoint()
-
+        from config import JARVIS_DIR
         # **Text Animation Variables**
-        self.font_renderer = FontRenderer("E:\\jarvis\\Client\\JARVIS2\\fonts\\Monomakh\\Monomakh-Regular.ttf", 18)  # **Font size set to 18px**
+        self.font_renderer = FontRenderer(os.path.join(JARVIS_DIR,"fonts","Monomakh","Monomakh-Regular.ttf"), 18)  # **Font size set to 18px**
         self.text_opacity = 0.0
         self.fade_in = True
         self.text_timer = QTimer(self)
