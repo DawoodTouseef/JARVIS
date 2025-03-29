@@ -1,28 +1,39 @@
-# Custom Open-Source License (COSL)
+Custom Open-Source License (COSL)
 
-## 1. Grant of License
+1. Grant of License
+
 This software is provided as an open-source project. You are granted a non-exclusive, worldwide, royalty-free license to use, modify, and contribute to the software, subject to the following terms:
 
-## 2. Permitted Uses
-- You may use, modify, and distribute your modified version of the software within your organization or for personal use.
-- Contributions to the project are welcome, provided they comply with the terms of this license.
+2. Permitted Uses
 
-## 3. Prohibited Uses
-- **Unauthorized Redistribution:** You may NOT distribute, resell, sublicense, or otherwise make the software available to any third party in any form without prior written permission from the original author(s).
-- **Modification & Redistribution:** You may modify the software for personal or internal use, but you are prohibited from distributing modified or unmodified copies outside your organization.
-- **Commercial Exploitation:** Using this software to create a competing or commercially sold product is strictly prohibited.
+You may use, modify, and distribute your modified version of the software within your organization or for personal use.
 
-## 4. Legal Enforcement
-- Any individual or organization found redistributing this software in violation of this license will be subject to **legal action** under applicable copyright laws.
-- The author(s) and contributors reserve the right to **pursue financial and legal penalties** against any entity found in breach of this agreement.
+Contributions to the project are welcome, provided they comply with the terms of this license.
 
-## 5. Disclaimer of Warranty
+3. Prohibited Uses
+
+Unauthorized Redistribution: You may NOT distribute, resell, sublicense, or otherwise make the software available to any third party in any form without prior written permission from the original author(s).
+
+Modification & Redistribution: You may modify the software for personal or internal use, but you are prohibited from distributing modified or unmodified copies outside your organization.
+
+Commercial Exploitation: Using this software to create a competing or commercially sold product is strictly prohibited.
+
+4. Legal Enforcement
+
+Any individual or organization found redistributing this software in violation of this license will be subject to legal action under applicable copyright laws.
+
+The author(s) and contributors reserve the right to pursue financial and legal penalties against any entity found in breach of this agreement.
+
+5. Disclaimer of Warranty
+
 THIS SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
 
-## 6. Termination
+6. Termination
+
 Any violation of the above terms will result in immediate termination of this license, and legal action may be taken.
 
-## 7. Governing Law
+7. Governing Law
+
 This license shall be governed by and construed in accordance with the laws of the jurisdiction in which the original author(s) reside.
 
 By using this software, you agree to abide by the terms of this license.
