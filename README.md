@@ -73,7 +73,7 @@ Built using modern technologies like **PyQt5, OpenCV, and advanced AI models**, 
 ## **📌 Roadmap**  
 
 🔹 Expand compatibility to **Linux/macOS**.  
-🔹 Integrate **real-time weather and news APIs**.  
+🔹 Integrate **real-time  news APIs**.  
 🔹 Enhance **text-to-speech (TTS)** with a JARVIS-like voice model.  
 🔹 Implement a **visual heads-up display (HUD)** for system diagnostics.  
 🔹 Optimize **performance for low-resource systems**.  
