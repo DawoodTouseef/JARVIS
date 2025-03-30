@@ -456,7 +456,7 @@ class AgentWorker(QObject):
         from core.vision_agents import vision_agent
         from core.Agent_models import get_model_from_database,get_vision_model_from_database
         if self.text is None:
-            if get_vision_model_from_database():
+            if get_vision_model_from_database() is not None:
                 response = vision_agent(images=self.image)
                 log.info(f"Agent Response: {response}")
                 self.response_signal.emit(response)
@@ -466,9 +466,15 @@ class AgentWorker(QObject):
         log.info(f"Processing input: {self.text}")
         if get_model_from_database():
             try:
-                response = get_agent(user_input=self.text)
-                log.info(f"Agent Response: {response}")
-                self.response_signal.emit(response)
+                if self.image is not  None:
+                    response = get_agent(user_input=self.text,image=self.image)
+                    log.info(f"Agent Response: {response}")
+                    self.response_signal.emit(response)
+                else:
+                    response = get_agent(user_input=self.text)
+                    log.info(f"Agent Response: {response}")
+                    self.response_signal.emit(response)
+
             except Exception as e:
                 self.response_signal.emit(f"⚠️ An error occurred: {str(e)}")
         else:

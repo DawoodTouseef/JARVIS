@@ -83,7 +83,8 @@ log_sources = [
     "MAIN",
     "AGENTS",
     "GUI",
-    "AUDIO"
+    "AUDIO",
+    "VISION"
 ]
 
 SRC_LOG_LEVELS = {}
