@@ -45,7 +45,7 @@ Built using modern technologies like **PyQt5, OpenCV, and advanced AI models**, 
 
 - **Operating System:** Windows 10/11 *(Linux/macOS support coming soon)*  
 - **Python Version:** 3.12 or higher  
-- **Hardware Requirements:** Microphone, webcam *(optional for camera analysis)*  
+- **Hardware Requirements:** Microphone, webcam *(optional for camera analysis)* , GPU (Optional for running in Ollama)
 - **Dependencies:** Listed in `requirements.txt`  
 
 ### **🚀 Setup & Usage**  
