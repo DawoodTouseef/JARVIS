@@ -66,8 +66,7 @@ from PIL import Image
 from mem0 import Memory,MemoryClient
 import socket
 import netifaces
-from threading import Thread
-
+from config import JARVIS_DIR
 log = loggers["AGENTS"]
 
 warnings.filterwarnings("ignore")
@@ -76,7 +75,7 @@ warnings.filterwarnings("ignore")
 grammar_tool = language_tool_python.LanguageTool('en-US')
 
 # Initialize Consciousness Components
-db = lancedb.connect("data/assistant_db")
+db = lancedb.connect(os.path.join(JARVIS_DIR,"data/assistant_db"))
 table = db.create_table("memory", [{"vector": [0.0]*384, "text": "", "timestamp": ""}], mode="overwrite")
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
@@ -1025,7 +1024,7 @@ workflow.add_edge("generate_response", END)
 graph = workflow.compile()
 
 # Main Function
-def get_agent(user_input: str=None, image: List[str] = None, audio: str = None) -> str:
+def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> str:
     initial_state: AgentState = {
         "messages": [HumanMessage(content=user_input)],
         "input": user_input,
