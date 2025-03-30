@@ -14,7 +14,7 @@
 
 from PyQt5.QtCore import QObject, QThread
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
+from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction
 from config import JARVIS_DIR
 from gui.user_setting import UserDialog
 from gui.settings import AndroidSettingsDialog
@@ -34,12 +34,15 @@ from gui.call import CallDialerDialog
 from core.personal_assistant import YahooFinanceTool, DatabaseTool
 from PyQt5.QtGui import QKeySequence
 from gui.integrations import IntegrationsDialog
-
+import io
+import pyautogui
 from PyQt5.QtCore import QVariantAnimation, pyqtProperty, pyqtSignal, QAbstractAnimation
 from PyQt5.QtGui import QColor, QPainter, QBrush, QPen, QLinearGradient, QConicalGradient, QFont
 from PyQt5.QtWidgets import (
     QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox,  QDialog
 )
+from core.brain import MemorySettings
+import time
 import os
 from config import  stop_event, loggers
 import sounddevice as sd
@@ -53,6 +56,9 @@ from datetime import datetime
 import cv2
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
+import requests
+from PIL import Image
+import socket
 
 if torch.cuda.is_available():
     tts = Indic_Parler_TTS()
@@ -66,18 +72,18 @@ class HoverButton(QPushButton):
 
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
-        self.setFixedSize(120, 40)
+        self.setFixedSize(140, 45)
         self.setStyleSheet("""
             QPushButton {
-                background-color: #282c34;
+                background-color: #1e1e1e;
                 color: white;
                 border-radius: 10px;
                 font-size: 14px;
                 font-weight: bold;
-                border: 2px solid #444;
+                border: 2px solid #333;
             }
             QPushButton:hover {
-                background-color: #00ffcc;
+                background-color: #00cc99;
                 color: black;
             }
         """)
@@ -88,9 +94,9 @@ class SecurityIndicator(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(80, 80)
+        self.setFixedSize(90, 90)
         self._status = False
-        self._opacity = 1.0
+        self.opacity = 1.0
 
     def set_status(self, active):
         """Change security status."""
@@ -98,86 +104,19 @@ class SecurityIndicator(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        """Draw indicator with neumorphic effect."""
+        """Draw security indicator."""
         painter = QPainter(self)
-        painter.setOpacity(self._opacity)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor(30, 30, 30))
+        painter.drawEllipse(0, 0, 90, 90)
 
-        # Background (Soft UI effect)
-        painter.setBrush(QColor(40, 40, 40))
-        painter.drawEllipse(0, 0, 80, 80)
-
-        # Status indicator
         color = QColor(0, 255, 0) if self._status else QColor(255, 0, 0)
         painter.setBrush(color)
-        painter.drawEllipse(20, 20, 40, 40)
-
-
-class SecurityRingVisual(QWidget):
-    """Circular ring visualizing security threat levels."""
-
-    def __init__(self):
-        super().__init__()
-        self.setFixedSize(200, 200)
-        self.threat_level = 0  # 0 to 100%
-
-    def set_threat_level(self, level):
-        """Set new threat level (0-100)."""
-        self.threat_level = level
-        self.update()
-
-    def paintEvent(self, event):
-        """Render circular security meter with gradient."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # Background Ring
-        painter.setPen(QPen(QColor(60, 60, 60), 8))
-        painter.drawEllipse(10, 10, 180, 180)
-
-        # Dynamic Threat Level Arc
-        gradient = QConicalGradient(100, 100, -90)
-        gradient.setColorAt(0, QColor(0, 255, 0))  # Green
-        gradient.setColorAt(0.7, QColor(255, 255, 0))  # Yellow
-        gradient.setColorAt(1, QColor(255, 0, 0))  # Red
-
-        painter.setPen(QPen(gradient, 8))
-        span = int(5760 * (self.threat_level / 100))
-        painter.drawArc(10, 10, 180, 180, 1440, span)
-
-
-class ThreatVisualization(QWidget):
-    """Pulsing threat visualization when a new threat is detected."""
-
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.alert_animation = QVariantAnimation()
-        self.alert_animation.valueChanged.connect(self.update)
-
-    def pulse_alert(self):
-        """Trigger pulse animation on threat detection."""
-        self.alert_animation.stop()
-        self.alert_animation.setDuration(1000)
-        self.alert_animation.setStartValue(0)
-        self.alert_animation.setEndValue(1)
-        self.alert_animation.start()
-
-    def paintEvent(self, event):
-        """Draw pulsing ring effect for threat alert."""
-        if self.alert_animation.state() == QAbstractAnimation.Running:
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing)
-
-            alpha = int(100 * self.alert_animation.currentValue())
-            radius = 50 + 20 * self.alert_animation.currentValue()
-
-            painter.setPen(QPen(QColor(255, 68, 68, alpha), 3))
-            painter.drawEllipse(self.rect().center(), radius, radius)
+        painter.drawEllipse(20, 20, 50, 50)
 
 
 class SecurityDashboard(QWidget):
-    """Main security dashboard widget."""
+    """Security dashboard widget."""
     threatDetected = pyqtSignal(dict)
     statusChanged = pyqtSignal(bool)
 
@@ -189,21 +128,17 @@ class SecurityDashboard(QWidget):
         layout = QVBoxLayout()
         layout.setContentsMargins(15, 15, 15, 15)
 
-        # Header
         self.status_header = QLabel("🛡️ Quantum Security Shield")
         self.status_header.setStyleSheet("font-size: 18px; color: #00ffff; font-weight: bold;")
 
-        # Real-time Stats
         stats_layout = QHBoxLayout()
         self.threat_count = QLabel("0 Threats Blocked")
         self.last_scan = QLabel("Last Scan: Never")
         stats_layout.addWidget(self.threat_count)
         stats_layout.addWidget(self.last_scan)
 
-        # Security Indicator
-        self.security_ring = SecurityRingVisual()
+        self.security_indicator = SecurityIndicator()
 
-        # Controls
         control_layout = QHBoxLayout()
         self.quick_scan_btn = HoverButton("🚀 Quick Scan")
         self.full_scan_btn = HoverButton("🛑 Full Scan")
@@ -212,7 +147,7 @@ class SecurityDashboard(QWidget):
 
         layout.addWidget(self.status_header)
         layout.addLayout(stats_layout)
-        layout.addWidget(self.security_ring)
+        layout.addWidget(self.security_indicator, alignment=Qt.AlignCenter)
         layout.addLayout(control_layout)
 
         self.setLayout(layout)
@@ -412,16 +347,26 @@ class AgentWorker(QObject):
     def __init__(self):
         super().__init__()
         self.text = None
-
+        self.image=None
     def set_text(self, text):
         self.text = text
+
+    def set_input(self,image):
+        self.image = image
 
     def run(self):
         from core.brain import get_agent
         from core.Agent_models import get_model_from_database
         if self.text is None:
-            self.response_signal.emit("Error: No input provided.")
-            return
+            if get_model_from_database():
+                try:
+                    response = get_agent(user_input="Explain this image",image=self.image)
+                    log.info(f"Agent Response: {response}")
+                    self.response_signal.emit(response)
+                except Exception as e:
+                    self.response_signal.emit(f"Error: {str(e)}")
+            else:
+                self.response_signal.emit("Please configure the model in settings.")
 
         log.info(f"Processing input: {self.text}")
         if get_model_from_database():
@@ -600,6 +545,111 @@ class TTSWorker(QObject):
         finally:
             self.finished_signal.emit()
 
+class ConsciousnessWorker(QObject):
+    update_signal = pyqtSignal(str)  # Proactive updates
+    image_signal = pyqtSignal(list)  # Image data for processing
+
+    def __init__(self, stop_event):
+        super().__init__()
+        self.stop_event = stop_event
+        self.memory = MemorySettings()
+        self.camera = cv2.VideoCapture(0)  # Default camera
+        self.last_screenshot_time = 0
+
+    def get_system_sensors(self):
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        battery = psutil.sensors_battery()
+        disk = psutil.disk_usage('/')
+        return {
+            "CPU Usage": f"{cpu_usage}%",
+            "Memory Usage": f"{memory.percent}%",
+            "Battery": f"{battery.percent}% (Plugged: {battery.power_plugged})" if battery else "N/A",
+            "Disk Usage": f"{disk.percent}%"
+        }
+
+    def get_network_status(self):
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            gateways = netifaces.gateways()
+            default_gateway = gateways['default'][netifaces.AF_INET][0] if 'default' in gateways else "Unknown"
+            return {
+                "IP Address": ip,
+                "Gateway": default_gateway,
+                "Internet": "Connected" if requests.get("http://www.google.com", timeout=2).status_code == 200 else "Disconnected"
+            }
+        except:
+            return {"Internet": "Status unknown"}
+
+    def capture_camera_feed(self):
+        if self.camera.isOpened():
+            ret, frame = self.camera.read()
+            if ret:
+                # Convert to PIL Image and save temporarily
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(frame_rgb)
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG")
+                return [buffer.getvalue()]  # Return as a list for get_agent compatibility
+        return None
+
+    def capture_screenshot(self):
+        screenshot = pyautogui.screenshot()
+        buffer = io.BytesIO()
+        screenshot.save(buffer, format="PNG")
+        return [buffer.getvalue()]
+
+    def run(self):
+        log.info("JARVIS consciousness online...")
+        while not self.stop_event.is_set():
+            try:
+                # System and network awareness
+                sensors = self.get_system_sensors()
+                network = self.get_network_status()
+                context = (
+                    f"System: {', '.join([f'{k}: {v}' for k, v in sensors.items()])} | "
+                    f"Network: {', '.join([f'{k}: {v}' for k, v in network.items()])}"
+                )
+                self.memory.add_memory(context, source="system")
+
+                # Proactive checks
+                if "Battery" in sensors and float(sensors["Battery"].split("%")[0]) < 20:
+                    suggestion = "Battery critically low, sir. Recommend plugging in or optimizing power usage."
+                    self.memory.add_memory(suggestion, source="proactive")
+                    self.update_signal.emit(suggestion)
+
+                if "Internet" in network and network["Internet"] == "Disconnected":
+                    suggestion = "Network offline, sir. Shall I troubleshoot connectivity?"
+                    self.memory.add_memory(suggestion, source="proactive")
+                    self.update_signal.emit(suggestion)
+
+                # Camera feed analysis (every 60 seconds)
+                camera_feed = self.capture_camera_feed()
+                if camera_feed:
+                    self.image_signal.emit(camera_feed)
+                    self.memory.add_memory("Captured camera feed", source="camera")
+
+                # Screenshot analysis (every 120 seconds, staggered from camera)
+                current_time = time.time()
+                if current_time - self.last_screenshot_time > 120:
+                    screenshot = self.capture_screenshot()
+                    self.image_signal.emit(screenshot)
+                    self.memory.add_memory("Captured screenshot", source="screenshot")
+                    self.last_screenshot_time = current_time
+
+                # Retrieve proactive context
+                proactive = self.memory.get_proactive_context("current state")
+                if proactive and "Suggestion" in proactive:
+                    self.update_signal.emit(proactive.split("Suggestion: ")[-1])
+
+                time.sleep(300)  # Check every 5 minutes for responsiveness
+            except Exception as e:
+                log.error(f"Consciousness error: {e}")
+
+    def cleanup(self):
+        if self.camera.isOpened():
+            self.camera.release()
 
 class ImagePreviewDialog(QDialog):
     def __init__(self, image, parent=None):
@@ -663,7 +713,14 @@ class AssistantGUI(QMainWindow):
         self.tray.setIcon(QIcon("icon.png"))  # Replace with your icon path
         self.tray.setVisible(True)
         self.tray_menu = QMenu()
+
+        # Add an exit option
+        exit_action = QAction("Exit", self.tray_menu)
+        exit_action.triggered.connect(self.exit_application)
+        self.tray_menu.addAction(exit_action)
+
         self.tray.setContextMenu(self.tray_menu)
+
         if self.audio_stream is not None:
             self.wake_word_thread = QThread()
             self.wake_word_worker = WakeWordWorker(self.porcupine, self.audio_stream, self.stop_recognition)
@@ -710,6 +767,29 @@ class AssistantGUI(QMainWindow):
         # Start the thread
         self.alert_thread.start()
 
+        # Consciousness Thread
+        self.consciousness_thread = QThread()
+        self.consciousness_worker = ConsciousnessWorker(self.stop_recognition)
+        self.consciousness_worker.moveToThread(self.consciousness_thread)
+        self.consciousness_worker.update_signal.connect(self.display_proactive_update)
+        self.consciousness_worker.image_signal.connect(self.process_image_input)
+        self.consciousness_thread.started.connect(self.consciousness_worker.run)
+
+        # Start the thread
+        self.consciousness_thread.start()
+
+    def process_image_input(self, image_data):
+        if not self.agent_thread.isRunning():
+            self.agent_worker.set_input(image=image_data)
+            self.agent_thread.start()
+            self.text_label.setText("JARVIS: Analyzing visual input...")
+
+    def display_proactive_update(self, update):
+        self.text_label.setText(f"JARVIS: {update}")
+        self.tts_worker.set_text(update)
+        if not self.tts_thread.isRunning():
+            self.tts_thread.start()
+
     def handle_alerts(self, alerts):
         # Show notification and play TTS
         self.start_tts("You have a new notification")
@@ -717,6 +797,10 @@ class AssistantGUI(QMainWindow):
             self.tray.showMessage("J.A.R.V.I.S. Alert", alert, QSystemTrayIcon.Information, 5000)
             self.start_tts(alert)
             QThread.msleep(1000)  # Small delay to avoid overlapping TTS
+
+    def exit_application(self):
+        """Exits the application."""
+        self.tray.hide()
 
     def center_window(self):
         screen = QApplication.primaryScreen()
@@ -777,9 +861,20 @@ class AssistantGUI(QMainWindow):
     def init_ui(self):
         """Initialize the main user interface with 3D transparent buttons and lighting effects."""
         # OpenGL Widget
+        central_widget = QWidget(self)
+        layout = QVBoxLayout()
+
+        # OpenGL Assistant Interface
         self.gl_widget = AssistantOpenGLWidget(self)
-        self.gl_widget.light_mode = False
-        self.setCentralWidget(self.gl_widget)
+
+        # Security Dashboard
+        self.security_dashboard = SecurityDashboard(self)
+
+        layout.addWidget(self.gl_widget)
+        layout.addWidget(self.security_dashboard)
+
+        central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
 
         # Transcription/Response Label
         self.text_label = AnimatedLabel(self)
@@ -1096,7 +1191,7 @@ class AssistantGUI(QMainWindow):
 
     def display_text(self, text):
         """Display text with animations and auto-clear."""
-        print(text)
+        log.info(text)
         self.animate_text_in(text)
 
         # Delay the fade-out animation

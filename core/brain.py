@@ -1025,7 +1025,7 @@ workflow.add_edge("generate_response", END)
 graph = workflow.compile()
 
 # Main Function
-def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> str:
+def get_agent(user_input: str=None, image: List[str] = None, audio: str = None) -> str:
     initial_state: AgentState = {
         "messages": [HumanMessage(content=user_input)],
         "input": user_input,

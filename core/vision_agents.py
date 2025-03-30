@@ -116,9 +116,6 @@ def vision_agent(
                     bin_image.append(image_path)
                 else:
                     bin_image.append(image)
-            coder=OpenAILMM(model_name=model.name,timeout=6000)
-            tester=OpenAILMM(model_name=model.name,timeout=6000)
-            debugger=OpenAILMM(model_name=model.name,timeout=6000)
             planner=OpenAILMM(model_name=model.name,timeout=6000)
             summarizer=OpenAILMM(model_name=model.name,timeout=6000)
             critic=OpenAILMM(model_name=model.name,timeout=6000)
