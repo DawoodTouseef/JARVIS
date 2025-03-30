@@ -1040,7 +1040,7 @@ def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> st
 
 if __name__ == "__main__":
     try:
-        input_query =  "what did i ask before/"
+        input_query =  "List the software in the system."
         response = get_agent(input_query)
         print(f"JARVIS: {response}")
     except Exception as  e:
