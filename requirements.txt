@@ -85,3 +85,7 @@ lancedb~=0.17.0
 easyocr~=1.7.1
 yfinance~=0.2.52
 setuptools~=77.0.3
+langchain-text-splitters~=0.3.6
+langchain-anthropic~=0.3.3
+GitPython~=3.1.44
+typer~=0.12.5
