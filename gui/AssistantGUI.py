@@ -610,19 +610,19 @@ class AlertCheck(QObject):
 
     def stop(self):
         self.running = False
-
+from queue import Queue
 class TTSWorker(QObject):
     finished_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
-        self.text = None
+        self.text =Queue()
 
     def set_text(self, text):
-        self.text = text
+        self.text.put(text)
 
     def run(self):
-        if self.text is None:
+        if self.text.empty():
             self.finished_signal.emit()
             return
 
@@ -630,10 +630,10 @@ class TTSWorker(QObject):
             sd.stop()
             stop_event.clear()
 
-        log.info(f"Speaking: {self.text}")
+        log.info(f"Speaking: {self.text.get()}")
         try:
             if torch.cuda.is_available():
-                audio, sample_rate = tts.run(self.text)  # Assuming tts.run is defined elsewhere
+                audio, sample_rate = tts.run(self.text.get())  # Assuming tts.run is defined elsewhere
                 sd.play(data=audio, samplerate=sample_rate)
                 sd.wait(ignore_errors=True)
                 sd.stop()
