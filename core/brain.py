@@ -90,7 +90,9 @@ class MemorySettings:
         self.users = None
         self.memory = None
         self.user_metadata = {}
-        self._initialize_memory()
+        thread=threading.Thread(self._initialize_memory())
+        thread.start()
+        thread.join()
 
     def _initialize_memory(self) -> None:
         """Initialize memory based on user settings with enhanced context."""
@@ -589,7 +591,7 @@ class ToolRouter:
             OpenWeatherMapQueryRun(api_wrapper=OpenWeatherMapAPIWrapper(openweathermap_api_key="4202369c9edac265f34291744abb70f4")),
             YouTubeSearchTool(),
             YahooFinanceNewsTool(),
-        ] + the_standard_tools + requests_tools + create_schedule_tools() + create_winget_tools() + create_sensor_tools() + create_consciousness_tools() + [search_on_internet, generate_code_with_aim_team]
+        ] + the_standard_tools + requests_tools + create_schedule_tools() + create_winget_tools() + create_sensor_tools() + create_consciousness_tools()
 
     def get_tools(self) -> List[BaseTool]:
         return self.tools

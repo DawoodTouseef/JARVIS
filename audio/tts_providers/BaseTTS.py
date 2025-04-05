@@ -29,11 +29,6 @@ from nltk.stem import WordNetLemmatizer
 from nltk import pos_tag
 from translate import Translator
 
-# Ensure necessary NLTK resources are available
-nltk.download('punkt')
-nltk.download('wordnet')
-nltk.download('averaged_perceptron_tagger')
-nltk.download('stopwords')
 
 # Initialize necessary tools
 lemmatizer = WordNetLemmatizer()

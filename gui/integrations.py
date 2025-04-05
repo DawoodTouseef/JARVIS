@@ -14,23 +14,20 @@
 import os
 import json
 import sqlite3
-from pathlib import Path
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QLineEdit, QFormLayout, QComboBox, QTabWidget,
-    QFileDialog, QMessageBox, QListWidget, QListWidgetItem, QCheckBox, QMainWindow,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QFileDialog, QMessageBox, QListWidget, QListWidgetItem
+
 )
-from PyQt5.QtGui import QFont, QIcon
-from config import SESSION_PATH, JARVIS_DIR
+from PyQt5.QtGui import QFont
+from config import  JARVIS_DIR
 from langchain.tools import BaseTool
 from typing import List, Optional
 from crewai import Agent, Task, Crew
 from crewai.tools import tool
-import inspect
-import importlib.util
-import ast
+
 
 # SQLite Database Setup
 conn = sqlite3.connect(os.path.join(JARVIS_DIR, "data", "assistant_data.db"), check_same_thread=False)

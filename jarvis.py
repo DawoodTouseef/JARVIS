@@ -211,14 +211,3 @@ class ApplicationManager:
     def run(self):
         sys.exit(self.app.exec_())
 
-
-# --------------------------- APPLICATION ENTRY POINT --------------------------- #
-if __name__ == "__main__":
-    log.info("Starting J.A.R.V.I.S. Virtual Assistant...")
-
-    # Run database migrations
-    run_migrations()
-
-    # Start Application
-    manager = ApplicationManager()
-    manager.run()
