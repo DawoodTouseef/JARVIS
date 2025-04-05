@@ -24,6 +24,7 @@ import pyaudio
 import pvporcupine
 import json
 import threading
+from queue import Queue
 from utils.models.users import Users
 import struct
 import speech_recognition as sr
@@ -610,7 +611,7 @@ class AlertCheck(QObject):
 
     def stop(self):
         self.running = False
-from queue import Queue
+
 class TTSWorker(QObject):
     finished_signal = pyqtSignal()
 
