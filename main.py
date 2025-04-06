@@ -5,16 +5,16 @@ import threading
 import subprocess
 import time
 import requests
-import nltk
+import nltk,dotenv
 from jarvis import ApplicationManager, run_migrations
 from config import loggers
 
+dotenv.load_dotenv()
 # --------------------------- ENVIRONMENT SETUP --------------------------- #
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] = "True"
-
+os.environ['USER_AGENT']="langchain-framework"
 log = loggers['MAIN']
-
 
 # --------------------------- SYSTEM UTILITIES --------------------------- #
 def print_system_info():

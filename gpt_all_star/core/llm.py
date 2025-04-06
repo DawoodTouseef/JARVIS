@@ -5,12 +5,13 @@ import openai
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
-
+from langchain_groq import ChatGroq
 
 class LLM_TYPE(str, Enum):
     OPENAI = "OPENAI"
     AZURE = "AZURE"
     ANTHROPIC = "ANTHROPIC"
+    GROQ = "GROQ"
 
 
 def create_llm(llm_name: LLM_TYPE) -> BaseChatModel:
@@ -36,6 +37,12 @@ def create_llm(llm_name: LLM_TYPE) -> BaseChatModel:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
             model_name=os.getenv("ANTHROPIC_API_MODEL", "claude-3-opus-20240229"),
             temperature=0.1,
+        )
+    elif llm_name == LLM_TYPE.GROQ:
+        return _create_chat_groq(
+            model_name=os.getenv("GROQ_API_MODEL"),
+            temperature=0.1,
+            groq_api_key=os.getenv("GROQ_API_KEY")
         )
     else:
         raise ValueError(f"Unsupported LLM type: {llm_name}")
@@ -82,4 +89,15 @@ def _create_chat_anthropic(
         model=model_name,
         temperature=temperature,
         streaming=True,
+    )
+
+def _create_chat_groq(
+    model_name: str, temperature: float, groq_api_key: str | None
+) -> ChatGroq:
+    openai.api_type = "openai"
+    return ChatGroq(
+        model=model_name,
+        streaming=True,
+        temperature=temperature,
+        groq_api_key=groq_api_key,
     )

@@ -14,8 +14,7 @@
 
 from PyQt5.QtCore import QObject, QThread
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction
-from config import JARVIS_DIR
+from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction,QStackedLayout
 from gui.user_setting import UserDialog
 from gui.settings import AndroidSettingsDialog
 from gui.AssistantOpenGLWidget import AssistantOpenGLWidget
@@ -45,9 +44,8 @@ from PyQt5.QtWidgets import (
 from core.brain import MemorySettings
 import time
 import os
-from config import  stop_event, loggers
+from config import  loggers,JARVIS_DIR
 import sounddevice as sd
-from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
 import torch
 import pyttsx4
 import numpy as np
@@ -64,9 +62,9 @@ import subprocess,platform
 
 
 if torch.cuda.is_available():
+    from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
     tts = Indic_Parler_TTS()
-else:
-    tts = pyttsx4.init()
+
 log = loggers["GUI"]
 
 
@@ -382,62 +380,71 @@ class SpeechRecognitionWorker(QObject):
     transcription_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, recognizer: sr.Recognizer(), microphone: sr.Microphone(), stop_event):
+    def __init__(self, recognizer: sr.Recognizer, microphone: sr.Microphone, stop_event):
         super().__init__()
         self.recognizer = recognizer
         self.microphone = microphone
         self.stop_event = stop_event
         self.log = loggers["AUDIO"]
+        self.energy_threshold = 300
+        self.silence_duration = 2  # seconds
+        self.frame_duration_ms = 30  # 30ms per frame
+        self.sample_rate = 16000
+        self.sample_width = 2
+        self.chunk_size = int(self.sample_rate * (self.frame_duration_ms / 1000.0))
 
-    def capture_with_vad(self, source):
-        audio_data = []
-        energy_threshold = 300
-        silence_duration = 2
+    def capture_with_local_vad(self, source):
+        audio_frames = []
         silence_counter = 0
 
-        while not self.stop_event.is_set():
-            try:
-                frame = source.stream.read(1024)
+        stream = source.stream
+        try:
+            while not self.stop_event.is_set():
+                frame = stream.read(self.chunk_size)
+                if not frame:
+                    break
+
                 pcm_data = np.frombuffer(frame, dtype=np.int16)
                 energy = np.sqrt(np.mean(pcm_data ** 2))
 
-                if energy > energy_threshold:
-                    audio_data.append(frame)
+                if energy > self.energy_threshold:
+                    audio_frames.append(frame)
                     silence_counter = 0
                 else:
                     silence_counter += 1
 
-                if silence_counter > silence_duration * (source.SAMPLE_RATE / 1024):
+                if silence_counter > (self.silence_duration * 1000 / self.frame_duration_ms):
                     break
-            except Exception as e:
-                self.error_signal.emit(f"Error during audio capture: {e}")
-                return None
+        except Exception as e:
+            self.error_signal.emit(f"⚠️ Error during audio capture: {e}")
+            return None
 
-        return sr.AudioData(b''.join(audio_data), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
+        return sr.AudioData(b''.join(audio_frames), self.sample_rate, self.sample_width)
 
     def run(self):
         try:
             with self.microphone as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=5)
-                self.listen_signal.emit("Listening...")
-                # Use VAD instead of recognizer.listen for consistency
-                audio = self.recognizer.listen(source)
-                if audio:
-                    self.listen_signal.emit("Recognizing...")
+                self.recognizer.adjust_for_ambient_noise(source, duration=2)
+                self.listen_signal.emit("🎙️ Listening...")
+
+                audio = self.capture_with_local_vad(source)
+
+                if audio is not None:
+                    self.listen_signal.emit("🧠 Recognizing speech...")
                     transcription = self.recognizer.recognize_whisper(audio, model="base")
                     self.log.info(f"Transcription: {transcription}")
                     self.transcription_signal.emit(transcription)
                 else:
-                    self.error_signal.emit("No audio captured.")
-        except sr.UnknownValueError:
-            self.log.error("Sorry, I didn't catch that.")
-            self.error_signal.emit("Sorry, I didn't catch that.")
-        except sr.RequestError as e:
-            self.log.error(f"API error: {e}")
-            self.error_signal.emit(f"API error: {e}")
-        except Exception as e:
-            self.error_signal.emit(str(e))
+                    self.error_signal.emit("⚠️ No speech detected or audio capture failed.")
 
+        except sr.UnknownValueError:
+            self.log.error("❌ Could not understand the audio.")
+            self.error_signal.emit("❌ Sorry, I couldn't understand what you said.")
+        except sr.RequestError as e:
+            self.log.error(f"🚫 API request error: {e}")
+            self.error_signal.emit(f"🚫 API request error: {e}")
+        except Exception as e:
+            self.error_signal.emit(f"⚠️ Unexpected error occurred: {str(e)}")
 
 class AgentWorker(QObject):
     response_signal = pyqtSignal(str)
@@ -612,40 +619,81 @@ class AlertCheck(QObject):
     def stop(self):
         self.running = False
 
+
 class TTSWorker(QObject):
     finished_signal = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, tts_model=None, stop_event=None):
         super().__init__()
-        self.text =Queue()
+        self.text_queue = Queue()
+        self.tts_model = tts_model  # GPU-based TTS model like parler-tts or similar
+        self.stop_event = stop_event or threading.Event()
+        self.pause_event = threading.Event()
+        self.volume = 1.0
+        self.engine = pyttsx4.init()
+        self.engine.setProperty('rate', 170)
 
-    def set_text(self, text):
-        self.text.put(text)
+    def set_text(self, text: str):
+        """Add text to the queue."""
+        if text:
+            self.text_queue.put(text)
+
+    def stop(self):
+        """Immediately stop TTS playback."""
+        self.stop_event.set()
+        sd.stop()
+        log.info("TTS playback stopped.")
+
+    def pause(self):
+        """Pause TTS playback."""
+        self.pause_event.set()
+        log.info("TTS playback paused.")
+
+    def resume(self):
+        """Resume TTS playback."""
+        self.pause_event.clear()
+        log.info("TTS playback resumed.")
+
+    def set_volume(self, volume: float):
+        """Set TTS volume (0.0 to 1.0)."""
+        volume = max(0.0, min(volume, 1.0))
+        self.volume = volume
+        self.engine.setProperty('volume', volume)
+        log.info(f"Volume set to {volume * 100:.0f}%")
 
     def run(self):
-        if self.text.empty():
-            self.finished_signal.emit()
-            return
+        """Process queued TTS entries."""
+        while not self.text_queue.empty():
+            if self.stop_event.is_set():
+                log.info("Stop event triggered. Aborting TTS playback.")
+                break
 
-        if stop_event.is_set():
-            sd.stop()
-            stop_event.clear()
+            if self.pause_event.is_set():
+                log.info("TTS is paused. Waiting...")
+                while self.pause_event.is_set():
+                    time.sleep(0.5)
+                if self.stop_event.is_set():
+                    break
 
-        log.info(f"Speaking: {self.text.get()}")
-        try:
-            if torch.cuda.is_available():
-                audio, sample_rate = tts.run(self.text.get())  # Assuming tts.run is defined elsewhere
-                sd.play(data=audio, samplerate=sample_rate)
-                sd.wait(ignore_errors=True)
-                sd.stop()
-            else:
-                # tts.setProperty("speaker_wav","")
-                tts.say(self.text)
-                tts.runAndWait()
-        except Exception as e:
-            log.error(f"TTS error: {e}")
-        finally:
-            self.finished_signal.emit()
+            text = self.text_queue.get()
+            log.info(f"🗣️ Speaking: {text}")
+
+            try:
+                if torch.cuda.is_available() and self.tts_model:
+                    audio, sample_rate = self.tts_model.run(text)
+                    if self.volume < 1.0:
+                        audio *= self.volume
+                    sd.play(audio, sample_rate)
+                    sd.wait()
+                    sd.stop()
+                else:
+                    self.engine.say(text)
+                    self.engine.runAndWait()
+
+            except Exception as e:
+                log.error(f"❌ TTS error: {e}")
+
+        self.finished_signal.emit()
 
 class ConsciousnessWorker(QObject):
     update_signal = pyqtSignal(str)  # Proactive updates
@@ -789,7 +837,10 @@ class AssistantGUI(QMainWindow):
         self.setWindowTitle("J.A.R.V.I.S.")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnBottomHint |
+            Qt.Tool
+        )
         self.recognition_running = False
         self.stop_recognition = threading.Event()
         self.login_page = login_page
@@ -806,7 +857,7 @@ class AssistantGUI(QMainWindow):
         self.text_label.setAlignment(Qt.AlignCenter)
         self.text_label.setStyleSheet("color: rgba(10, 10, 10, 0.9); font-size: 18px;")
         self.text_label.setFont(QFont("Arial", 18, QFont.Bold))
-        self.text_label.start_fade_animation("Hello, I am JARVIS")
+        #self.text_label.start_fade_animation("Hello, I am JARVIS")
 
         self.security_dashboard = SecurityDashboard(self)
         self.security_dashboard.setGeometry(20, 150, 610, 200)
@@ -848,7 +899,7 @@ class AssistantGUI(QMainWindow):
         # Note: started signal not connected directly to run due to parameter issue
 
         self.tts_thread = QThread()
-        self.tts_worker = TTSWorker()
+        self.tts_worker = TTSWorker(tts_model=tts,stop_event=self.stop_recognition)
         self.tts_worker.moveToThread(self.tts_thread)
         self.tts_worker.finished_signal.connect(self.tts_finished)
         self.tts_thread.started.connect(self.tts_worker.run)
@@ -884,10 +935,10 @@ class AssistantGUI(QMainWindow):
         if not self.agent_thread.isRunning():
             self.agent_worker.set_input(image=image_data)
             self.agent_thread.start()
-            self.text_label.setText("JARVIS: Analyzing visual input...")
+            self.display_text("JARVIS: Analyzing visual input...")
 
     def display_proactive_update(self, update):
-        self.text_label.setText(f"JARVIS: {update}")
+        self.display_text(f"JARVIS: {update}")
         self.tts_worker.set_text(update)
         if not self.tts_thread.isRunning():
             self.tts_thread.start()
@@ -962,19 +1013,23 @@ class AssistantGUI(QMainWindow):
 
     def init_ui(self):
         """Initialize the main user interface with 3D transparent buttons and lighting effects."""
-        # OpenGL Widget
+        # Central widget and layout
         central_widget = QWidget(self)
         layout = QVBoxLayout()
 
+        # Stacked Layout to switch between views
+        self.stacked_layout = QStackedLayout()
+
         # OpenGL Assistant Interface
         self.gl_widget = AssistantOpenGLWidget(self)
+        self.stacked_layout.addWidget(self.gl_widget)
 
         # Security Dashboard
         self.security_dashboard = SecurityDashboard(self)
+        self.stacked_layout.addWidget(self.security_dashboard)
 
-        layout.addWidget(self.gl_widget)
-        layout.addWidget(self.security_dashboard)
-
+        # Set stacked layout to the main layout
+        layout.addLayout(self.stacked_layout)
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
 
@@ -1023,7 +1078,7 @@ class AssistantGUI(QMainWindow):
                 "icon": "home.svg",
                 "callback": self.home_application,
                 "tooltip": "Home",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_M)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_Home)
             },
             {
                 "name": "call_button",
@@ -1031,7 +1086,7 @@ class AssistantGUI(QMainWindow):
                 "icon": "phone.svg",
                 "callback": self.call_application,
                 "tooltip": "Call Window",
-                "key": QKeySequence(Qt.CTRL + Qt.Key_C)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C)
             },
             {
                 "name": "close_button",
@@ -1041,6 +1096,23 @@ class AssistantGUI(QMainWindow):
                 "tooltip": "Close Application",
                 "key": QKeySequence(Qt.Key.Key_Alt + Qt.Key_F4)
             },
+            # New buttons to switch views
+            {
+                "name": "assistant_view_button",
+                "geometry": (580, 20, 60, 60),
+                "icon": "assistant.svg",
+                "callback": self.show_assistant_view,
+                "tooltip": "Show Assistant Dashboard",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_1)
+            },
+            {
+                "name": "security_view_button",
+                "geometry": (580, 100, 60, 60),
+                "icon": "shield.svg",
+                "callback": self.show_security_view,
+                "tooltip": "Show Security Dashboard",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_2)
+            },
         ]
 
         for config in button_config:
@@ -1049,7 +1121,7 @@ class AssistantGUI(QMainWindow):
             button.setGeometry(*config["geometry"])
             button.clicked.connect(config["callback"])
             button.setShortcut(config['key'])
-            button.setToolTip(f"{config.get("tooltip", "")} ({config['key'].toString()})")
+            button.setToolTip(f"{config.get('tooltip', '')} ({config['key'].toString()})")
 
             # Add moving light effect on hover
             shadow = QGraphicsDropShadowEffect()
@@ -1061,27 +1133,17 @@ class AssistantGUI(QMainWindow):
             setattr(self, config["name"], button)
 
         # Enable the window to be resized
-        self.setFixedSize(650, 800)  # Adjust size if needed
+        self.setFixedSize(650, 800)
         self.center_window()
         self.show()
 
-    def update_security_indicator(self, status):
-        """Update Security Indicator based on System Status"""
-        self.security_indicator.set_status(status['active'])
-        self.animate_security_indicator(status['active'])
+    def show_assistant_view(self):
+        """Switch to Assistant Dashboard (OpenGL Widget)."""
+        self.stacked_layout.setCurrentWidget(self.gl_widget)
 
-    def animate_security_indicator(self, active):
-        """Add Fade Effect on Security Indicator"""
-        animation = QPropertyAnimation(self.security_indicator, b"opacity")
-        animation.setDuration(500)
-        animation.setStartValue(0.5 if active else 1.0)
-        animation.setEndValue(1.0 if active else 0.5)
-        animation.start()
-
-    def handle_threat(self, threat_info):
-        """Handle Detected Threats"""
-        self.text_label.start_fade_animation(f"⚠️ Threat Detected: {threat_info['file_path']}")
-        self.text_label.setStyleSheet("color: #ff4444; font-weight: bold;")
+    def show_security_view(self):
+        """Switch to Security Dashboard."""
+        self.stacked_layout.setCurrentWidget(self.security_dashboard)
 
     def on_wake_word_detected(self):
         """Handle wake word detection."""
