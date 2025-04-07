@@ -15,6 +15,7 @@
 from PyQt5.QtCore import QObject, QThread
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction,QStackedLayout
+from config import JARVIS_DIR
 from gui.user_setting import UserDialog
 from gui.settings import AndroidSettingsDialog
 from gui.AssistantOpenGLWidget import AssistantOpenGLWidget
@@ -44,8 +45,9 @@ from PyQt5.QtWidgets import (
 from core.brain import MemorySettings
 import time
 import os
-from config import  loggers,JARVIS_DIR
+from config import  stop_event, loggers
 import sounddevice as sd
+from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
 import torch
 import pyttsx4
 import numpy as np
@@ -62,9 +64,9 @@ import subprocess,platform
 
 
 if torch.cuda.is_available():
-    from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
     tts = Indic_Parler_TTS()
-
+else:
+    tts = pyttsx4.init()
 log = loggers["GUI"]
 
 
@@ -619,81 +621,40 @@ class AlertCheck(QObject):
     def stop(self):
         self.running = False
 
-
 class TTSWorker(QObject):
     finished_signal = pyqtSignal()
 
-    def __init__(self, tts_model=None, stop_event=None):
+    def __init__(self):
         super().__init__()
-        self.text_queue = Queue()
-        self.tts_model = tts_model  # GPU-based TTS model like parler-tts or similar
-        self.stop_event = stop_event or threading.Event()
-        self.pause_event = threading.Event()
-        self.volume = 1.0
-        self.engine = pyttsx4.init()
-        self.engine.setProperty('rate', 170)
+        self.text =Queue()
 
-    def set_text(self, text: str):
-        """Add text to the queue."""
-        if text:
-            self.text_queue.put(text)
-
-    def stop(self):
-        """Immediately stop TTS playback."""
-        self.stop_event.set()
-        sd.stop()
-        log.info("TTS playback stopped.")
-
-    def pause(self):
-        """Pause TTS playback."""
-        self.pause_event.set()
-        log.info("TTS playback paused.")
-
-    def resume(self):
-        """Resume TTS playback."""
-        self.pause_event.clear()
-        log.info("TTS playback resumed.")
-
-    def set_volume(self, volume: float):
-        """Set TTS volume (0.0 to 1.0)."""
-        volume = max(0.0, min(volume, 1.0))
-        self.volume = volume
-        self.engine.setProperty('volume', volume)
-        log.info(f"Volume set to {volume * 100:.0f}%")
+    def set_text(self, text):
+        self.text.put(text)
 
     def run(self):
-        """Process queued TTS entries."""
-        while not self.text_queue.empty():
-            if self.stop_event.is_set():
-                log.info("Stop event triggered. Aborting TTS playback.")
-                break
+        if self.text.empty():
+            self.finished_signal.emit()
+            return
 
-            if self.pause_event.is_set():
-                log.info("TTS is paused. Waiting...")
-                while self.pause_event.is_set():
-                    time.sleep(0.5)
-                if self.stop_event.is_set():
-                    break
+        if stop_event.is_set():
+            sd.stop()
+            stop_event.clear()
 
-            text = self.text_queue.get()
-            log.info(f"🗣️ Speaking: {text}")
-
-            try:
-                if torch.cuda.is_available() and self.tts_model:
-                    audio, sample_rate = self.tts_model.run(text)
-                    if self.volume < 1.0:
-                        audio *= self.volume
-                    sd.play(audio, sample_rate)
-                    sd.wait()
-                    sd.stop()
-                else:
-                    self.engine.say(text)
-                    self.engine.runAndWait()
-
-            except Exception as e:
-                log.error(f"❌ TTS error: {e}")
-
-        self.finished_signal.emit()
+        log.info(f"Speaking: {self.text.get()}")
+        try:
+            if torch.cuda.is_available():
+                audio, sample_rate = tts.run(self.text.get())  # Assuming tts.run is defined elsewhere
+                sd.play(data=audio, samplerate=sample_rate)
+                sd.wait(ignore_errors=True)
+                sd.stop()
+            else:
+                # tts.setProperty("speaker_wav","")
+                tts.say(self.text)
+                tts.runAndWait()
+        except Exception as e:
+            log.error(f"TTS error: {e}")
+        finally:
+            self.finished_signal.emit()
 
 class ConsciousnessWorker(QObject):
     update_signal = pyqtSignal(str)  # Proactive updates
@@ -837,10 +798,7 @@ class AssistantGUI(QMainWindow):
         self.setWindowTitle("J.A.R.V.I.S.")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnBottomHint |
-            Qt.Tool
-        )
+            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
         self.recognition_running = False
         self.stop_recognition = threading.Event()
         self.login_page = login_page
@@ -857,7 +815,7 @@ class AssistantGUI(QMainWindow):
         self.text_label.setAlignment(Qt.AlignCenter)
         self.text_label.setStyleSheet("color: rgba(10, 10, 10, 0.9); font-size: 18px;")
         self.text_label.setFont(QFont("Arial", 18, QFont.Bold))
-        #self.text_label.start_fade_animation("Hello, I am JARVIS")
+        self.text_label.start_fade_animation("Hello, I am JARVIS")
 
         self.security_dashboard = SecurityDashboard(self)
         self.security_dashboard.setGeometry(20, 150, 610, 200)
@@ -899,7 +857,7 @@ class AssistantGUI(QMainWindow):
         # Note: started signal not connected directly to run due to parameter issue
 
         self.tts_thread = QThread()
-        self.tts_worker = TTSWorker(tts_model=tts,stop_event=self.stop_recognition)
+        self.tts_worker = TTSWorker()
         self.tts_worker.moveToThread(self.tts_thread)
         self.tts_worker.finished_signal.connect(self.tts_finished)
         self.tts_thread.started.connect(self.tts_worker.run)
@@ -935,10 +893,10 @@ class AssistantGUI(QMainWindow):
         if not self.agent_thread.isRunning():
             self.agent_worker.set_input(image=image_data)
             self.agent_thread.start()
-            self.display_text("JARVIS: Analyzing visual input...")
+            self.text_label.setText("JARVIS: Analyzing visual input...")
 
     def display_proactive_update(self, update):
-        self.display_text(f"JARVIS: {update}")
+        self.text_label.setText(f"JARVIS: {update}")
         self.tts_worker.set_text(update)
         if not self.tts_thread.isRunning():
             self.tts_thread.start()
@@ -1013,23 +971,27 @@ class AssistantGUI(QMainWindow):
 
     def init_ui(self):
         """Initialize the main user interface with 3D transparent buttons and lighting effects."""
-        # Central widget and layout
+        # Central Widget and Layout
         central_widget = QWidget(self)
         layout = QVBoxLayout()
 
-        # Stacked Layout to switch between views
+        # Stacked layout to switch between Assistant and Security Dashboards
         self.stacked_layout = QStackedLayout()
 
-        # OpenGL Assistant Interface
         self.gl_widget = AssistantOpenGLWidget(self)
-        self.stacked_layout.addWidget(self.gl_widget)
-
-        # Security Dashboard
         self.security_dashboard = SecurityDashboard(self)
-        self.stacked_layout.addWidget(self.security_dashboard)
 
-        # Set stacked layout to the main layout
-        layout.addLayout(self.stacked_layout)
+        self.stacked_layout.addWidget(self.gl_widget)  # index 0
+        self.stacked_layout.addWidget(self.security_dashboard)  # index 1
+
+        # Current dashboard state
+        self.current_view = "assistant"  # or "security"
+
+        # Container for the stacked layout
+        stacked_container = QWidget()
+        stacked_container.setLayout(self.stacked_layout)
+
+        layout.addWidget(stacked_container)
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
 
@@ -1076,9 +1038,9 @@ class AssistantGUI(QMainWindow):
                 "name": "home_button",
                 "geometry": (340, 20, 60, 60),
                 "icon": "home.svg",
-                "callback": self.home_application,
-                "tooltip": "Home",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_Home)
+                "callback": self.toggle_dashboard_view,  # <- switch between views
+                "tooltip": "Toggle Dashboard View",
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_H)
             },
             {
                 "name": "call_button",
@@ -1086,7 +1048,7 @@ class AssistantGUI(QMainWindow):
                 "icon": "phone.svg",
                 "callback": self.call_application,
                 "tooltip": "Call Window",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_P)
             },
             {
                 "name": "close_button",
@@ -1094,24 +1056,7 @@ class AssistantGUI(QMainWindow):
                 "icon": "close.svg",
                 "callback": self.closeapplication,
                 "tooltip": "Close Application",
-                "key": QKeySequence(Qt.Key.Key_Alt + Qt.Key_F4)
-            },
-            # New buttons to switch views
-            {
-                "name": "assistant_view_button",
-                "geometry": (580, 20, 60, 60),
-                "icon": "assistant.svg",
-                "callback": self.show_assistant_view,
-                "tooltip": "Show Assistant Dashboard",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_1)
-            },
-            {
-                "name": "security_view_button",
-                "geometry": (580, 100, 60, 60),
-                "icon": "shield.svg",
-                "callback": self.show_security_view,
-                "tooltip": "Show Security Dashboard",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_2)
+                "key": QKeySequence(Qt.ALT + Qt.Key.Key_F4)
             },
         ]
 
@@ -1137,13 +1082,32 @@ class AssistantGUI(QMainWindow):
         self.center_window()
         self.show()
 
-    def show_assistant_view(self):
-        """Switch to Assistant Dashboard (OpenGL Widget)."""
-        self.stacked_layout.setCurrentWidget(self.gl_widget)
+    def toggle_dashboard_view(self):
+        """Switch between Assistant and Security Dashboard using state."""
+        if self.current_view == "assistant":
+            self.stacked_layout.setCurrentIndex(1)
+            self.current_view = "security"
+        else:
+            self.stacked_layout.setCurrentIndex(0)
+            self.current_view = "assistant"
 
-    def show_security_view(self):
-        """Switch to Security Dashboard."""
-        self.stacked_layout.setCurrentWidget(self.security_dashboard)
+    def update_security_indicator(self, status):
+        """Update Security Indicator based on System Status"""
+        self.security_indicator.set_status(status['active'])
+        self.animate_security_indicator(status['active'])
+
+    def animate_security_indicator(self, active):
+        """Add Fade Effect on Security Indicator"""
+        animation = QPropertyAnimation(self.security_indicator, b"opacity")
+        animation.setDuration(500)
+        animation.setStartValue(0.5 if active else 1.0)
+        animation.setEndValue(1.0 if active else 0.5)
+        animation.start()
+
+    def handle_threat(self, threat_info):
+        """Handle Detected Threats"""
+        self.text_label.start_fade_animation(f"⚠️ Threat Detected: {threat_info['file_path']}")
+        self.text_label.setStyleSheet("color: #ff4444; font-weight: bold;")
 
     def on_wake_word_detected(self):
         """Handle wake word detection."""

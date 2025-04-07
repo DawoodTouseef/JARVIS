@@ -44,7 +44,6 @@ from typing import Union, List, Dict, Any
 from datetime import datetime, timedelta
 from config import SESSION_PATH
 from utils.models.users import Users
-from mem0 import MemoryClient, Memory
 from core.Agent_models import get_model_from_database
 import threading
 import time
@@ -67,6 +66,7 @@ from mem0 import Memory,MemoryClient
 import socket
 import netifaces
 from config import JARVIS_DIR
+
 log = loggers["AGENTS"]
 
 warnings.filterwarnings("ignore")
@@ -90,9 +90,7 @@ class MemorySettings:
         self.users = None
         self.memory = None
         self.user_metadata = {}
-        thread=threading.Thread(self._initialize_memory())
-        thread.start()
-        thread.join()
+        self._initialize_memory()
 
     def _initialize_memory(self) -> None:
         """Initialize memory based on user settings with enhanced context."""

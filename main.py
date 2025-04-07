@@ -7,9 +7,12 @@ import time
 import requests
 import nltk,dotenv
 from jarvis import ApplicationManager, run_migrations
-from config import loggers
+from config import loggers,VERSION
+import warnings
 
 dotenv.load_dotenv()
+warnings.filterwarnings("ignore")
+
 # --------------------------- ENVIRONMENT SETUP --------------------------- #
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] = "True"
@@ -22,6 +25,7 @@ def print_system_info():
     log.info(f"   🖥️ OS        : {platform.system()} {platform.release()}")
     log.info(f"   🐍 Python    : {platform.python_version()}")
     log.info(f"   📂 Directory : {os.getcwd()}")
+    log.info(f"      J.A.R.V.I.S: {VERSION}    ")
 
 
 def check_internet(timeout=5):

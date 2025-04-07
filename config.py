@@ -22,7 +22,7 @@ import threading
 
 stop_event = threading.Event()
 
-
+VERSION="0.0.1"
 class Model(BaseModel):
     name:str
     type:str
