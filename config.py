@@ -23,6 +23,7 @@ import threading
 stop_event = threading.Event()
 
 VERSION="0.0.1"
+
 class Model(BaseModel):
     name:str
     type:str
@@ -53,54 +54,47 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 LOG_FILE = os.path.join(LOG_DIR, "app.log")
 
-# Define available log levels
 log_levels = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
-
-# Get global log level from environment or default to INFO
 GLOBAL_LOG_LEVEL = os.environ.get("GLOBAL_LOG_LEVEL", "INFO").upper()
 if GLOBAL_LOG_LEVEL not in log_levels:
     GLOBAL_LOG_LEVEL = "INFO"
 
-# Configure root logger with thread-safe handlers
-logging.basicConfig(
-    level=getattr(logging, GLOBAL_LOG_LEVEL),
-    format="%(asctime)s - %(levelname)s - [%(name)s] - %(threadName)s - %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE,mode='a', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+# Remove all handlers associated with the root logger
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
 
-# Create main logger
+# Configure root logger manually
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, GLOBAL_LOG_LEVEL))
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - [%(name)s] - %(threadName)s - %(message)s")
+
+file_handler = logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8')
+file_handler.setFormatter(formatter)
+
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+
+root_logger.addHandler(file_handler)
+root_logger.addHandler(stream_handler)
+
 log = logging.getLogger("MainLogger")
-log.setLevel(GLOBAL_LOG_LEVEL)
-log.propagate = True  # Ensure propagation to root logger
+log.setLevel(getattr(logging, GLOBAL_LOG_LEVEL))
+log.propagate = False
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
 
-# Define sources and their log levels
-log_sources = [
-    "DB",
-    "MAIN",
-    "AGENTS",
-    "GUI",
-    "AUDIO",
-    "VISION"
-]
-
+log_sources = ["DB", "MAIN", "AGENTS", "GUI", "AUDIO", "VISION"]
 SRC_LOG_LEVELS = {}
 loggers = {}
 
 for source in log_sources:
     log_env_var = source + "_LOG_LEVEL"
     source_log_level = os.environ.get(log_env_var, GLOBAL_LOG_LEVEL).upper()
-
     if source_log_level not in log_levels:
         source_log_level = GLOBAL_LOG_LEVEL
 
-    # Create and configure logger for each source
     source_logger = logging.getLogger(source)
     source_logger.setLevel(getattr(logging, source_log_level))
-    source_logger.propagate = True  # Allow messages to reach root logger
+    source_logger.propagate = True
 
     SRC_LOG_LEVELS[source] = source_log_level
     loggers[source] = source_logger

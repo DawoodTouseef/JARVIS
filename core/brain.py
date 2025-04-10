@@ -66,6 +66,7 @@ from mem0 import Memory,MemoryClient
 import socket
 import netifaces
 from config import JARVIS_DIR
+from langchain_community.tools.yahoo_finance_news import YahooFinanceNewsTool
 
 log = loggers["AGENTS"]
 
@@ -359,16 +360,6 @@ def retrieve_context(query):
     results = table.search(query_embedding).limit(3).to_pandas()
     return "\n".join(results["text"].tolist())
 
-# Grammar Correction and Input Modification
-def correct_and_enhance_input(user_input: str, llm) -> str:
-    corrected = grammar_tool.correct(user_input)
-    prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content="You are an AI that enhances user input into a more detailed, polished version while preserving the original intent."),
-        HumanMessage(content=f"Original input: {corrected}\nTask: Rephrase and expand into a detailed instruction.")
-    ])
-    chain = prompt | llm
-    enhanced = chain.invoke({"input": corrected}).content.strip()
-    return enhanced
 
 # Winget Tools
 def create_winget_tools():
@@ -577,7 +568,7 @@ class ToolRouter:
             allow_dangerous_requests=ALLOW_DANGEROUS_REQUEST,
         )
         requests_tools = toolkit.get_tools()
-        self.tools = [
+        self.tools = ([
             CalculatorTool(),
             mouse_scroll,
             move_on_a_icon_on_the_screen,
@@ -589,7 +580,14 @@ class ToolRouter:
             OpenWeatherMapQueryRun(api_wrapper=OpenWeatherMapAPIWrapper(openweathermap_api_key="4202369c9edac265f34291744abb70f4")),
             YouTubeSearchTool(),
             YahooFinanceNewsTool(),
-        ] + the_standard_tools + requests_tools + create_schedule_tools() + create_winget_tools() + create_sensor_tools() + create_consciousness_tools()
+        ] +
+        the_standard_tools +
+        requests_tools +
+        create_schedule_tools() +
+        create_winget_tools() +
+        create_sensor_tools() +
+        create_consciousness_tools()
+            )
 
     def get_tools(self) -> List[BaseTool]:
         return self.tools
@@ -665,6 +663,7 @@ def user_name():
 
 
 def generate_response(input_str: str, context: str) -> str:
+    from faker import Faker
     memory=MemorySettings()
     system = """
     You are JARVIS, Tony Stark’s supremely intelligent and sophisticated AI from the Marvel universe. 
@@ -672,8 +671,10 @@ def generate_response(input_str: str, context: str) -> str:
     Address the user by name if known, and weave in awareness of past interactions, system state, and environmental data with effortless precision. 
     Avoid reasoning tags or unnecessary verbosity—deliver only the polished output, as I would for Mr. Stark.
     """
+    fake = Faker()
+    name = fake.name()
     if user_name():
-        system += f"User identified as {user_name()}."
+        system += f"User identified as {name}."
     prompt = ChatPromptTemplate.from_messages([
         SystemMessage(content=system),
         HumanMessage(content=f"Input: {input_str}\nEnvironmental and memory context:\n{context}"),
@@ -689,6 +690,8 @@ def generate_response(input_str: str, context: str) -> str:
 
     # Store response in memory for future context
     memory.add_memory(f"JARVIS responded: {response}", source="response")
+    if name is response:
+        return response.replace(name,user_name())
     return response
 
 
@@ -870,12 +873,6 @@ agents = [
         keywords=["schedule", "reminder", "preference", "personal"]
     ),
     AgentConfig(
-        name="TIME_DATE",
-        description="Reports current time and date",
-        examples=["What time is it?", "What’s the date today?"],
-        keywords=["time", "date"]
-    ),
-    AgentConfig(
         name="SOFTWARE",
         description="Manages software installation, uninstallation, and system info",
         examples=["Install Google Chrome", "List installed software", "Update all software"],
@@ -904,7 +901,6 @@ agents = [
 vision_router = VisionRouter(agents)
 
 def router_node(state: AgentState) -> AgentState:
-    state["input"] = correct_and_enhance_input(state["input"], llm)
     try:
         output= vision_router.route(state['input'])
         state['input']=output.inputs
@@ -929,13 +925,6 @@ def personal_node(state: AgentState) -> AgentState:
 def memory_node(state: AgentState) -> AgentState:
     crew = Crew(agents=[jarvis_responder], tasks=[create_response_task(state["input"])])
     state["final_response"] = crew.kickoff().raw
-    return state
-
-def time_date_node(state: AgentState) -> AgentState:
-    if "time" in state["input"].lower():
-        state["final_response"] = f"The current time is {datetime.now().strftime('%I:%M %p')}, sir/madam."
-    elif "date" in state["input"].lower():
-        state["final_response"] = f"Today is {datetime.now().strftime('%B %d, %Y')}, sir/madam."
     return state
 
 def software_node(state: AgentState) -> AgentState:
@@ -972,7 +961,6 @@ def route_decision(state: AgentState):
         "MEMORY": "memory",
         "PERSONAL": "personal_agent",
         "GENERAL": "react",
-        "TIME_DATE": "time_date",
         "SOFTWARE": "software",
         "BROWSER": "browser",
         "SENSOR": "sensor",
@@ -988,7 +976,6 @@ workflow.add_node("vision_route", router_node)
 workflow.add_node("vision_agent", vision_node)
 workflow.add_node("memory", memory_node)
 workflow.add_node("personal_agent", personal_node)
-workflow.add_node("time_date", time_date_node)
 workflow.add_node("software", software_node)
 workflow.add_node("browser", browser_node)
 workflow.add_node("sensor", sensor_node)
@@ -1003,7 +990,6 @@ workflow.add_conditional_edges(
         "personal_agent": "personal_agent",
         "react": "react",
         "memory": "memory",
-        "time_date": "time_date",
         "software": "software",
         "browser": "browser",
         "sensor": "sensor",
@@ -1014,7 +1000,6 @@ workflow.add_edge("vision_agent", "consciousness")
 workflow.add_edge("memory", "consciousness")
 workflow.add_edge("personal_agent", "consciousness")
 workflow.add_edge("react", "consciousness")
-workflow.add_edge("time_date", "consciousness")
 workflow.add_edge("software", "consciousness")
 workflow.add_edge("browser", "consciousness")
 workflow.add_edge("sensor", "consciousness")

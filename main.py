@@ -25,7 +25,7 @@ def print_system_info():
     log.info(f"   🖥️ OS        : {platform.system()} {platform.release()}")
     log.info(f"   🐍 Python    : {platform.python_version()}")
     log.info(f"   📂 Directory : {os.getcwd()}")
-    log.info(f"      J.A.R.V.I.S: {VERSION}    ")
+    log.info(f"   🤖 J.A.R.V.I.S: {VERSION}    ")
 
 
 def check_internet(timeout=5):

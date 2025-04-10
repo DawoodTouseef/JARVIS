@@ -476,17 +476,17 @@ class AgentWorker(QObject):
         log.info(f"Processing input: {self.text}")
         if get_model_from_database():
             try:
-                if self.image is not  None:
+                try:
                     response = get_agent(user_input=self.text,image=self.image)
                     log.info(f"Agent Response: {response}")
                     self.response_signal.emit(response)
-                else:
+                except Exception as e:
                     response = get_agent(user_input=self.text)
                     log.info(f"Agent Response: {response}")
                     self.response_signal.emit(response)
-
             except Exception as e:
-                self.response_signal.emit(f"⚠️ An error occurred: {str(e)}")
+                log.error(f"⚠️ An error occurred: {str(e)}")
+                self.response_signal.emit(f"⚠️ An error occurred")
         else:
             self.response_signal.emit("⚠️ Oops! It looks like the model isn't configured yet. Please check the settings and set it up to proceed.")
 
@@ -626,7 +626,7 @@ class TTSWorker(QObject):
 
     def __init__(self):
         super().__init__()
-        self.text =Queue()
+        self.text = Queue()
 
     def set_text(self, text):
         self.text.put(text)
@@ -640,21 +640,23 @@ class TTSWorker(QObject):
             sd.stop()
             stop_event.clear()
 
-        log.info(f"Speaking: {self.text.get()}")
+        current_text = self.text.get()
+        loggers["AUDIO"].info(f"Speaking: {current_text}")
+
         try:
             if torch.cuda.is_available():
-                audio, sample_rate = tts.run(self.text.get())  # Assuming tts.run is defined elsewhere
+                audio, sample_rate = tts.run(current_text)
                 sd.play(data=audio, samplerate=sample_rate)
                 sd.wait(ignore_errors=True)
                 sd.stop()
             else:
-                # tts.setProperty("speaker_wav","")
-                tts.say(self.text)
+                tts.say(current_text)
                 tts.runAndWait()
         except Exception as e:
-            log.error(f"TTS error: {e}")
+            loggers["AUDIO"].error(f"TTS error: {e}")
         finally:
             self.finished_signal.emit()
+
 
 class ConsciousnessWorker(QObject):
     update_signal = pyqtSignal(str)  # Proactive updates
@@ -1130,43 +1132,22 @@ class AssistantGUI(QMainWindow):
     def start_tts(self, text):
         """Starts the TTS (Text-to-Speech) thread."""
         self.display_text(f"J.A.R.V.I.S.: {text}")
+        self.tts_worker.set_text(text)
         if not self.tts_thread.isRunning():
-            self.tts_worker.set_text(text)
             self.tts_thread.start()
 
     def tts_finished(self):
         """Handles completion of TTS playback."""
-        self.tts_thread.quit()
-        self.tts_thread.wait()
-        self.agent_thread.quit()
-        self.agent_thread.wait()
-        self.speech_thread.quit()
-        self.speech_thread.wait()
+        if self.tts_thread.isRunning():
+            self.tts_thread.quit()
+            self.tts_thread.wait()
+        if self.agent_thread.isRunning():
+            self.agent_thread.quit()
+            self.agent_thread.wait()
+        if self.speech_thread.isRunning():
+            self.speech_thread.quit()
+            self.speech_thread.wait()
         self.stop_interaction_animation()
-
-    def record(self):
-        self.gl_widget.toggle_animation()
-        if self.gl_widget.animation_running and not self.recognition_running:
-            try:
-                self.stop_recognition.clear()
-                self.recognition_running = True
-                mic_svg = os.path.join(JARVIS_DIR, "icons", "mic.svg")
-                self.record_button.setIcon(QIcon(mic_svg))
-                self.speech_thread.start()
-            except Exception as e:
-                self.display_error(f"Failed to start recording: {e}")
-                self.recognition_running = False
-        else:
-            try:
-                if hasattr(self, 'speech_thread') and self.speech_thread.isRunning():
-                    self.stop_recognition.set()
-                    self.recognition_running = False
-                    mic_svg = os.path.join(JARVIS_DIR, "icons", "mic-off.svg")
-                    self.record_button.setIcon(QIcon(mic_svg))
-                    self.speech_thread.quit()
-                    self.speech_thread.wait()
-            except Exception as e:
-                self.display_error(f"Failed to stop recording: {e}")
 
     def change_color(self):
         dialog = IntegrationsDialog(self)

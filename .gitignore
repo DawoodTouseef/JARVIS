@@ -11,3 +11,4 @@ core/data
 logs/
 __pycache__/
 core/__pycache__/
+core/browserNode/
