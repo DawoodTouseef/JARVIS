@@ -48,6 +48,38 @@ Built using modern technologies like **PyQt5, OpenCV, and advanced AI models**, 
 - **Hardware Requirements:** Microphone, webcam *(optional for camera analysis)* , GPU (Optional for running in LLM in locally)
 - **Dependencies:** Listed in `requirements.txt`  
 
+### **⚙️ Installation (Windows)**
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/DawoodTouseef/JARVIS.git
+   cd JARVIS
+   ```
+2. **Create and Activate a Virtual Environment**
+    ```bash
+    python -m venv venv
+    .\venv\Scripts\activate
+    ```
+3. **Install Requirements**
+    ```bash
+    pip install -r requirements.txt
+   ```
+4. **Run the Application**
+    ```bash
+   .\run_jarvis.bat
+   ```
+5. **Run GPT ALL STAR**
+    ```
+   .\run_jarvis.bat --coder
+   ```
+6. **Run Open Interpreter**
+    ```
+   .\run_jarvis.bat --interpreter
+   ```
+7. **Settings for GPT ALL STAR or Open Interpreter**
+    ```bash
+   .\run_jarvis.bat -settings
+   ```
 ### **🚀 Setup & Usage**  
 
 #### **1️⃣ Launching JARVIS**  
