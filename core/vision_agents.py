@@ -11,138 +11,237 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# vision_module.py
 
-from vision_agent.agent import VisionAgentCoderV2
-from vision_agent.models import AgentMessage
-from core.Agent_models import get_vision_model_from_database
-from typing import List, Optional
+import torch
+import requests
+import tempfile
+import json
 import os
-import numpy as np
-from contextlib import contextmanager
-from vision_agent.tools import load_image,save_image
-from config import  JARVIS_DIR,loggers
-from vision_agent.configs.openai_config import OpenAILMM
-from vision_agent.agent.vision_agent_planner_v2 import VisionAgentPlannerV2
-import uuid
+from PIL import Image
+from io import BytesIO
+from datetime import datetime
+from pydantic import Field
+from typing import Callable, Optional, List
+from deepface import DeepFace
+from transformers import (
+    DetrImageProcessor, DetrForObjectDetection,
+    BlipProcessor, BlipForConditionalGeneration
+)
 
-# Configure logging
-logger = loggers['VISION']
+from crewai import Agent, Task, Crew, Process, LLM
+from crewai_tools import BaseTool, FileWriterTool
+from langchain_core.callbacks import CallbackManagerForToolRun
 
-DEFAULT_PROMPT = """Provide detailed description of the image(s) focusing on:
-- Text content (OCR information)
-- Distinct objects and their spatial relationships
-- Color schemes and visual style
-- Actions or activities depicted
-- Contextual information and subtle details
-- Specific terminologies for semantic document retrieval"""
+from config import JARVIS_DIR
+from core.Agent_models import get_vision_model_from_database
+from standard_tools import NextCloudTool
 
-def resize_image(image_path:str):
+# ---------------------------- Human Input Tool ----------------------------
+class HumanInputRun(BaseTool):
+    name: str = "human"
+    description: str = "Ask user for guidance when unsure."
+    prompt_func: Callable[[str], None] = Field(default_factory=lambda: lambda x: print("\n" + x))
+    input_func: Callable = Field(default_factory=lambda: input)
+
+    def _run(self, query: str) -> str:
+        self.prompt_func(query)
+        return self.input_func()
+
+# ---------------------------- Task Type Detection ----------------------------
+class TaskTypeDetector:
+    def detect_task(self, user_input: str) -> str:
+        prompt = f"""
+        Classify the task:
+        - object_detection
+        - image_to_text
+        - facial_analysis
+        - all
+
+        User input: "{user_input}"
+        Output only the category.
+        """
+        llm_info = get_vision_model_from_database()
+        llm = LLM(model="openai/meta-llama/llama-4-scout-17b-16e-instruct", base_url=llm_info.url, api_key=llm_info.api_key)
+        response = llm.call([{"role": "user", "content": prompt}])
+        task_type = response.strip()
+        return task_type if task_type in ["object_detection", "image_to_text", "facial_analysis", "all"] else "all"
+
+# ---------------------------- Image Preprocessing ----------------------------
+def load_image(source) -> Image.Image:
+    if isinstance(source, str) and source.startswith(("http", "https")):
+        response = requests.get(source)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content)).convert("RGB")
+    elif isinstance(source, bytes):
+        return Image.open(BytesIO(source)).convert("RGB")
+    elif isinstance(source, str) and os.path.exists(source):
+        return Image.open(source).convert("RGB")
+    raise ValueError("Unsupported image format or path.")
+
+def save_temp_image(image: Image.Image) -> str:
+    os.makedirs(os.path.join(JARVIS_DIR, "data", "images"), exist_ok=True)
+    path = os.path.join(JARVIS_DIR, "data", "images", f"temp_{os.urandom(8).hex()}.png")
+    image.save(path, format="PNG")
+    return path
+
+# ---------------------------- Vision Models ----------------------------
+class ObjectDetector:
+    def __init__(self):
+        self.processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
+        self.model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
+        self.model.eval()
+
+    def detect(self, image: Image.Image):
+        inputs = self.processor(images=image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        target_sizes = torch.tensor([image.size[::-1]])
+        results = self.processor.post_process_object_detection(outputs, target_sizes=target_sizes, threshold=0.9)[0]
+        return [
+            {
+                "label": self.model.config.id2label[label.item()],
+                "confidence": float(score),
+                "box": [float(x) for x in box]
+            }
+            for score, label, box in zip(results["scores"], results["labels"], results["boxes"])
+        ]
+
+class ImageToText:
+    def __init__(self):
+        self.processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        self.model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+        self.model.eval()
+
+    def generate(self, image: Image.Image):
+        inputs = self.processor(images=image, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self.model.generate(**inputs)
+        return self.processor.decode(outputs[0], skip_special_tokens=True)
+
+class FaceAnalyzer:
+    def analyze(self, image_path: str):
+        try:
+            return DeepFace.analyze(img_path=image_path, actions=["age", "gender", "emotion", "race"], enforce_detection=False)
+        except Exception as e:
+            return {"error": f"Face detection failed: {str(e)}"}
+
+# ---------------------------- Vision Analysis Tool ----------------------------
+class VisionAnalysisTool(BaseTool):
+    name: str = "Vision Analysis Tool"
+    description: str = "Detects faces, objects, and generates captions based on intent."
+    image_inputs: List = Field(default_factory=list)
+
+    def __init__(self, image_inputs: List):
+        super().__init__(image_inputs=image_inputs)
+
+    def _run(self, user_input: str) -> str:
+        task_detector = TaskTypeDetector()
+        task_type = task_detector.detect_task(user_input)
+
+        detector = ObjectDetector()
+        captioner = ImageToText()
+        analyzer = FaceAnalyzer()
+
+        all_results = []
+
+        for img_input in self.image_inputs:
+            try:
+                image = load_image(img_input)
+                temp_path = save_temp_image(image)
+
+                result = {"input": "image" if isinstance(img_input, bytes) else str(img_input)}
+                if task_type in ("object_detection", "all"):
+                    result["objects"] = detector.detect(image)
+                if task_type in ("image_to_text", "all"):
+                    result["caption"] = captioner.generate(image)
+                if task_type in ("facial_analysis", "all"):
+                    result["faces"] = analyzer.analyze(temp_path)
+
+                all_results.append(result)
+                os.remove(temp_path)
+
+            except Exception as e:
+                all_results.append({"error": str(e)})
+
+        return json.dumps(all_results, indent=2)
+
+# ---------------------------- Vision Agent Pipeline ----------------------------
+def vision_agent(image_inputs, user_input: str):
+    model_info = get_vision_model_from_database()
+    llm = LLM(model="openai/meta-llama/llama-4-scout-17b-16e-instruct", base_url=model_info.url, api_key=model_info.api_key)
+
+    vision_agent = Agent(
+        role="Vision Analyzer",
+        goal="Analyze visual input for faces, objects, and descriptions.",
+        backstory="You are a vision expert assistant.",
+        tools=[VisionAnalysisTool(image_inputs)],
+        verbose=True,
+        llm=llm
+    )
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_filename = f"vision_report_{timestamp}.json"
+    report_path = os.path.join(JARVIS_DIR, "data", "reports", report_filename)
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+
+    reporter = Agent(
+        role="Report Generator",
+        goal="Summarize and store visual analysis reports.",
+        backstory="You format vision data and upload or save them.",
+        tools=[FileWriterTool(), NextCloudTool(), HumanInputRun()],
+        verbose=True,
+        llm=llm
+    )
+
+    analysis_task = Task(
+        description=f"Analyze the image(s) for: {user_input}. Return JSON.",
+        agent=vision_agent,
+        expected_output="Vision analysis in JSON"
+    )
+
+    report_task = Task(
+        description=f"""
+        Create a summary from the analysis results.
+        - Include objects, faces, and scene.
+        - Save locally to '{report_path}' or upload to '/VisionReports/{report_filename}'.
+        - If unsure, ask the user using the human tool.
+        Return confirmation.
+        """,
+        agent=reporter,
+        expected_output="Formatted report summary with save/upload status."
+    )
+
+    crew = Crew(
+        agents=[vision_agent, reporter],
+        tasks=[analysis_task, report_task],
+        process=Process.sequential,
+        verbose=True,
+        max_rpm=3
+    )
+
+    return crew.kickoff({"user_input": user_input})
+
+# ---------------------------- CLI Testing Entry ----------------------------
+if __name__ == "__main__":
     import cv2
 
-    # Read the image
-    image = cv2.imread(image_path)
+    def capture_image_from_cam():
+        cam = cv2.VideoCapture(0)
+        ret, frame = cam.read()
+        cam.release()
+        if ret:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(rgb_frame)
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            return [buffer.getvalue()]
+        return []
 
-    # Reduce size by half
-    height, width = image.shape[:2]
-    new_size = (width // 2, height // 2)
-    resized_image = cv2.resize(image, new_size)
-
-    # Save the resized image
-    cv2.imwrite(image_path, resized_image)
-
-@contextmanager
-def vision_model_context():
-    """Context manager for handling vision model configuration"""
-    model = get_vision_model_from_database()
-    if model:
-        original_openai_url = os.environ.get("OPENAI_BASE_URL")
-        original_openai_key = os.environ.get("OPENAI_API_KEY")
-
-        os.environ["OPENAI_BASE_URL"] = model.url
-        os.environ["OPENAI_API_KEY"] = model.api_key
-        
-        try:
-            yield model
-        finally:
-            # Restore original environment variables
-            if original_openai_url:
-                os.environ["OPENAI_BASE_URL"] = original_openai_url
-            else:
-                del os.environ["OPENAI_BASE_URL"]
-
-            if original_openai_key:
-                os.environ["OPENAI_API_KEY"] = original_openai_key
-            else:
-                del os.environ["OPENAI_API_KEY"]
-    else:
-        logger.error("No vision model configured in database")
-        yield None
-
-
-def vision_agent(
-    prompt: str = None,
-    images: List = None  # Changed from List[str] to List to accept bytes or str
-) -> Optional[str]:
-    try:
-        with vision_model_context() as model:
-            if not model:
-                return None
-
-            if not images:  # Check if images list is empty
-                logger.error("No images provided for processing")
-                return None
-
-            final_prompt = prompt or DEFAULT_PROMPT
-            logger.info(f"Processing {len(images)} images with prompt: {final_prompt[:50]}...")
-            bin_image = []
-            image_paths=[]
-            for image in images:
-                image_dir = os.path.join(JARVIS_DIR, "data", "images")
-                image_path = os.path.join(image_dir, f"image-{str(uuid.uuid4())}.jpg")
-                if isinstance(image, str) and image.startswith(("http", "https")):
-                    # Handle URL strings
-                    np_image = load_image(image)
-                    save_image(np_image, image_path)
-                    resize_image(image_path)
-                    bin_image.append(image_path)
-                elif isinstance(image, bytes):
-                    # Handle bytes input from camera feed
-                    from PIL import Image
-                    import io
-                    img = Image.open(io.BytesIO(image))
-                    np_image = np.array(img)
-                    save_image(np_image, image_path)
-                    resize_image(image_path)
-                    bin_image.append(image_path)
-                else:
-                    # Handle local file paths or other string inputs
-                    bin_image.append(image)
-                image_paths.append(image_path)
-            planner = OpenAILMM(model_name=model.name, timeout=6000)
-            summarizer = OpenAILMM(model_name=model.name, timeout=6000)
-            critic = OpenAILMM(model_name=model.name, timeout=6000)
-            planner = VisionAgentPlannerV2(planner, summarizer, critic)
-            agent = VisionAgentCoderV2(
-                verbose=True,
-                planner=planner,
-            )
-            code_context = agent.generate_code([
-                AgentMessage(
-                    role="user",
-                    content=final_prompt,
-                    media=bin_image
-                )
-            ])
-
-            if not code_context or not code_context.code:
-                logger.warning("No code generated by the vision agent")
-                return None
-            for i in image_paths:
-                os.remove(i)
-            return f"{code_context.code}\n\n{code_context.test or 'No tests generated'}"
-
-    except Exception as e:
-        return f"Sorry i could not get know what are you doing"
+    input_query = "Analyze objects and faces in this photo."
+    captured = capture_image_from_cam()
+    output = vision_agent(captured, input_query)
+    print(output)
 
 
 if __name__ == "__main__":
