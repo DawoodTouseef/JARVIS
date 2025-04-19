@@ -24,12 +24,12 @@ import inspect
 from typing import Type, List, Optional, Any
 from pydantic import BaseModel, create_model
 from langchain.tools import BaseTool
-
+from langchain.tools import StructuredTool
 import nextcloud_client
 from crewai_tools import BaseTool
 from datetime import datetime
 import os
-
+from pydantic import Field
 class NextCloudTool(BaseTool):
     name: str = "NextCloudTool"
     description: str = (
@@ -547,20 +547,31 @@ def load_api_key():
             return api_key
     return None
 
-def nmap_tool(target:str,port:int)->dict:
+class NmapInput(BaseModel):
+    """Input schema for nmap_tool."""
+    target: str = Field(description="IP address of the network to scan.")
+    port: int = Field(description="Port of the device to scan.")
+
+def nmap_tool(inputs:NmapInput) -> dict:
     """
-    A function  provides a number of features for probing computer networks, including host discovery and service and operating system detection.
+    A function provides a number of features for probing computer networks, including host discovery and service and operating system detection.
     These features are extensible by scripts that provide more advanced service detection, vulnerability detection, and other features.
     Nmap can adapt to network conditions including latency and congestion during a scan.
-    :param target:ip address of the network
-    :param port:port of the device to scan.
-    :return:
+    :param target: IP address of the network
+    :param port: Port of the device to scan.
+    :return: Dictionary containing scan results
     """
     scanner = nmap.PortScanner()
-    res = scanner.scan(target, str(port))
+    res = scanner.scan(inputs.target, str(inputs.port))
     return res
 
-nmap_tools=tool(nmap_tool)
+nmap_tools = StructuredTool.from_function(
+    func=nmap_tool,
+    name="nmap_scan",
+    description="Scans a network target and port using Nmap to detect hosts, services, and operating systems.",
+    args_schema=NmapInput,
+    return_direct=True,
+)
 
 
 def click_on_a_text_on_the_screen_(text: str, click_type: str = "singular") -> bool:
@@ -609,9 +620,12 @@ def click_on_a_text_on_the_screen_(text: str, click_type: str = "singular") -> b
 
 
 click_on_a_text_on_the_screen = tool(click_on_a_text_on_the_screen_)
+class MoveTextInput(BaseModel):
+    """Input schema for move_on_a_text_on_the_screen tool."""
+    text: str = Field(description="The text to move the mouse to.")
 
 
-def move_on_a_text_on_the_screen_(text: str) -> bool:
+def move_on_a_text_on_the_screen_(text: MoveTextInput) -> bool:
     """
     A function to move on a text on the screen.
 
@@ -635,7 +649,7 @@ def move_on_a_text_on_the_screen_(text: str) -> bool:
 
         screenshot = pyautogui.screenshot()
 
-        text_locations = interpreter.computer.display.find_text(text, screenshot=screenshot)
+        text_locations = interpreter.computer.display.find_text(text.text, screenshot=screenshot)
 
         print(text_locations)
 
@@ -653,10 +667,20 @@ def move_on_a_text_on_the_screen_(text: str) -> bool:
         return False
 
 
-move_on_a_text_on_the_screen = tool(move_on_a_text_on_the_screen_)
+move_on_a_text_on_the_screen = StructuredTool.from_function(
+    func=move_on_a_text_on_the_screen_,
+    name="move_on_text",
+    description="Moves the mouse to specified text on the screen.",
+    args_schema=MoveTextInput,
+    return_direct=True,
+)
 
+class ClickIconInput(BaseModel):
+    """Input schema for mouse_scroll tool."""
+    icon_name: str = Field(description="The icon name to be clicked on.")
+    click_type: str = Field(default="singular", description='The type of click to be performed. The default value is "singular". Possible values are "singular" and "double".')
 
-def click_on_a_icon_on_the_screen_(icon_name: str, click_type: str = "singular") -> bool:
+def click_on_a_icon_on_the_screen_(inputs:ClickIconInput) -> bool:
     """
     A function to click on a icon name on the screen.
 
@@ -672,19 +696,19 @@ def click_on_a_icon_on_the_screen_(icon_name: str, click_type: str = "singular")
         pyautogui.FAILSAFE = False
 
         from interpreter import OpenInterpreter
-
+        from core.Agent_models import get_vision_model_from_database
         screenshot = pyautogui.screenshot()
 
         interpreter = OpenInterpreter()
 
-        interpreter.llm.model = f"openai/{get_model().model_name}"
-        interpreter.llm.model.url = get_model().openai_api_base
-        interpreter.llm.model.api_key = get_model().openai_api_key
+        interpreter.llm.model = f"openai/{get_vision_model_from_database().name}"
+        interpreter.llm.model.url = get_vision_model_from_database().url
+        interpreter.llm.model.api_key = get_vision_model_from_database().api_key
 
-        if click_type == "singular":
-            interpreter.computer.mouse.click(icon=icon_name, screenshot=screenshot)
-        elif click_type == "double":
-            interpreter.computer.mouse.double_click(icon=icon_name, screenshot=screenshot)
+        if inputs.click_type == "singular":
+            interpreter.computer.mouse.click(icon=inputs.icon_name, screenshot=screenshot)
+        elif inputs.click_type == "double":
+            interpreter.computer.mouse.double_click(icon=inputs.icon_name, screenshot=screenshot)
         return True
 
     except:
@@ -692,10 +716,15 @@ def click_on_a_icon_on_the_screen_(icon_name: str, click_type: str = "singular")
         return False
 
 
-click_on_a_icon_on_the_screen = tool(click_on_a_icon_on_the_screen_)
 
+click_on_a_icon_on_the_screen=StructuredTool.from_function(
+    func=click_on_a_icon_on_the_screen_,
+    name="Click Icon",
+    args_schema=ClickIconInput,
+    description="A function to click on a icon name on the screen."
+)
 
-def move_on_a_icon_on_the_screen_(icon_name: str, ) -> bool:
+def move_on_a_icon_on_the_screen_(icon_name: str) -> bool:
     """
     A function to move on a icon name on the screen.
 
@@ -729,8 +758,13 @@ def move_on_a_icon_on_the_screen_(icon_name: str, ) -> bool:
 
 move_on_a_icon_on_the_screen = tool(move_on_a_icon_on_the_screen_)
 
+class MouseScrollInput(BaseModel):
+    """Input schema for mouse_scroll tool."""
+    direction: str = Field(description="The direction of the scroll. Possible values are 'up' or 'down'.")
+    amount: int = Field(default=1, description="The amount of scrolling to be performed. Default is 1.")
 
-def mouse_scroll_(direction: str, amount: int = 1) -> bool:
+
+def mouse_scroll_(inputs:MouseScrollInput) -> bool:
     """
     A function to scroll the mouse wheel.
 
@@ -741,24 +775,30 @@ def mouse_scroll_(direction: str, amount: int = 1) -> bool:
     Returns:
     - bool: True if the scrolling was performed successfully, False otherwise.
     """
+    import pyautogui
     try:
-        import pyautogui
         pyautogui.FAILSAFE = False
-
-        if direction == "up":
-            pyautogui.scroll(amount)
-        elif direction == "down":
-            pyautogui.scroll(-amount)
+        if inputs.direction == "up":
+            pyautogui.scroll(inputs.amount)
+        elif inputs.direction == "down":
+            pyautogui.scroll(-inputs.amount)
         return True
     except:
         traceback.print_exc()
         return False
 
 
-mouse_scroll = tool(mouse_scroll_)
+# Wrap the function as a StructuredTool
+mouse_scroll = StructuredTool.from_function(
+    func=mouse_scroll_,
+    name="mouse_scroll",
+    description="Scrolls the mouse wheel in the specified direction by the given amount.",
+    args_schema=MouseScrollInput,
+    return_direct=True,
+)
 
 
-def google(query: str, max_number: int = 20) -> list:
+def google(query: str) -> list:
     """
     Search the query on Google and return the results.
     """
@@ -769,13 +809,13 @@ def google(query: str, max_number: int = 20) -> list:
         return "An exception occurred"
 
 
-def duckduckgo(query: str, max_number: int = 20) -> list:
+def duckduckgo(query: str) -> list:
     """
     Search the query on DuckDuckGo and return the results.
     """
     try:
         from duckduckgo_search import DDGS
-        return [result["href"] for result in DDGS().text(query, max_results=max_number)]
+        return [result["href"] for result in DDGS().text(query, max_results=20)]
     except Exception as e:
         return ["An exception occurred"]
 
@@ -810,7 +850,6 @@ def sleep(seconds: int):
     """
     import time
     time.sleep(seconds)
-
 
 
 the_standard_tools_ = []
