@@ -31,11 +31,10 @@ from transformers import (
 
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import BaseTool, FileWriterTool
-from langchain_core.callbacks import CallbackManagerForToolRun
 
 from config import JARVIS_DIR
 from core.Agent_models import get_vision_model_from_database
-from standard_tools import NextCloudTool
+from core.tools.standard_tools import NextCloudTool
 
 # ---------------------------- Human Input Tool ----------------------------
 class HumanInputRun(BaseTool):
