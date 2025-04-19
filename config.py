@@ -82,7 +82,7 @@ log.setLevel(getattr(logging, GLOBAL_LOG_LEVEL))
 log.propagate = False
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
 
-log_sources = ["DB", "MAIN", "AGENTS", "GUI", "AUDIO", "VISION"]
+log_sources = ["DB", "MAIN", "AGENTS", "GUI", "AUDIO", "VISION","MEMORY"]
 SRC_LOG_LEVELS = {}
 loggers = {}
 
