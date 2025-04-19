@@ -211,3 +211,8 @@ class ApplicationManager:
     def run(self):
         sys.exit(self.app.exec_())
 
+
+if __name__=="__main__":
+    run_migrations()
+    app=ApplicationManager()
+    app.run()

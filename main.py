@@ -5,30 +5,28 @@ import threading
 import subprocess
 import time
 import requests
-import nltk,dotenv
-from jarvis import ApplicationManager, run_migrations
-from config import loggers,VERSION
+import nltk, dotenv
 import warnings
+import argparse
+from coder.cli.console_terminal import ConsoleTerminal, MAIN_COLOR
+from InquirerPy import inquirer
 
+# --------------------------- ENVIRONMENT --------------------------- #
 dotenv.load_dotenv()
 warnings.filterwarnings("ignore")
 
-# --------------------------- ENVIRONMENT SETUP --------------------------- #
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['LITELLM_LOCAL_MODEL_COST_MAP'] = "True"
-os.environ['USER_AGENT']="langchain-framework"
-log = loggers['MAIN']
 
 # --------------------------- SYSTEM UTILITIES --------------------------- #
-def print_system_info():
+def print_system_info(log):
+    from config import VERSION
     log.info("🧠 System Diagnostics:")
     log.info(f"   🖥️ OS        : {platform.system()} {platform.release()}")
     log.info(f"   🐍 Python    : {platform.python_version()}")
     log.info(f"   📂 Directory : {os.getcwd()}")
-    log.info(f"   🤖 J.A.R.V.I.S: {VERSION}    ")
+    log.info(f"   🤖 J.A.R.V.I.S: {VERSION}")
 
 
-def check_internet(timeout=5):
+def check_internet(log, timeout=5):
     try:
         log.info("🌐 Checking internet connectivity...")
         requests.get("http://example.com", timeout=timeout)
@@ -39,7 +37,7 @@ def check_internet(timeout=5):
         return False
 
 
-def download_nltk_resources():
+def download_nltk_resources(log):
     try:
         log.info("📥 Downloading NLTK resources...")
         nltk.download('punkt', quiet=True)
@@ -51,7 +49,10 @@ def download_nltk_resources():
         log.warning(f"[!] NLTK download error: {e}")
 
 
-def initialize_resources():
+def initialize_resources(log):
+    from jarvis import run_migrations
+    from whisper import load_model
+    import torch
     try:
         log.info("🛠️ Running database migrations...")
         run_migrations()
@@ -60,54 +61,51 @@ def initialize_resources():
         log.error(f"[!] Migration failed: {e}")
         sys.exit(1)
 
-    thread = threading.Thread(target=download_nltk_resources, daemon=True)
-    thread.start()
-    return thread
+    download_nltk_resources(log)
 
 
 # --------------------------- TOR FUNCTIONS --------------------------- #
 def is_tor_running():
     try:
-        res = requests.get("http://httpbin.org/ip", proxies={"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}, timeout=5)
+        requests.get("http://httpbin.org/ip",
+                     proxies={"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}, timeout=5)
         return True
     except:
         return False
 
 
-def launch_tor():
+def launch_tor(log):
     log.info("🕵️ Tor not running. Attempting to start Tor...")
-
-    if platform.system() == "Windows":
-        tor_path = os.path.expandvars(r"%ProgramFiles%\Tor Browser\Browser\TorBrowser\Tor\tor.exe")
-        if not os.path.exists(tor_path):
-            tor_path = os.path.expandvars(r"%ProgramFiles(x86)%\Tor Browser\Browser\TorBrowser\Tor\tor.exe")
-        if not os.path.exists(tor_path):
-            log.error("❌ Could not find Tor executable. Please install Tor Browser.")
-            return False
-
-        subprocess.Popen([tor_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    elif platform.system() in ["Linux", "Darwin"]:
-        try:
+    try:
+        if platform.system() == "Windows":
+            tor_paths = [
+                os.path.expandvars(r"%ProgramFiles%\Tor Browser\Browser\TorBrowser\Tor\tor.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Tor Browser\Browser\TorBrowser\Tor\tor.exe")
+            ]
+            for path in tor_paths:
+                if os.path.exists(path):
+                    subprocess.Popen([path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    break
+            else:
+                raise FileNotFoundError("Tor executable not found")
+        elif platform.system() in ["Linux", "Darwin"]:
             subprocess.Popen(["tor"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except FileNotFoundError:
-            log.error("❌ Tor not installed. Install with: sudo apt install tor")
-            return False
-    else:
-        log.error("❌ Unsupported OS for auto-starting Tor.")
+        else:
+            raise EnvironmentError("Unsupported OS for Tor auto-start")
+
+        for _ in range(10):
+            if is_tor_running():
+                log.info("✅ Tor started and is running.")
+                return True
+            time.sleep(1)
+
+        raise TimeoutError("Tor did not start in time")
+    except Exception as e:
+        log.error(f"❌ Tor startup failed: {e}")
         return False
 
-    # Wait for Tor to become ready
-    for _ in range(10):
-        if is_tor_running():
-            log.info("✅ Tor started and is running.")
-            return True
-        time.sleep(1)
 
-    log.error("❌ Tor failed to start.")
-    return False
-
-
-def check_ip_through_proxy(proxy=None, label="Direct"):
+def check_ip_through_proxy(log, proxy=None, label="Direct"):
     try:
         proxies = {'http': proxy, 'https': proxy} if proxy else None
         log.info(f"🌍 Checking IP via {label} connection...")
@@ -118,36 +116,139 @@ def check_ip_through_proxy(proxy=None, label="Direct"):
         log.warning(f"[!] {label} IP check failed: {e}")
 
 
-# --------------------------- MAIN FUNCTION --------------------------- #
-def main():
-    log.info("🤖 Launching J.A.R.V.I.S. Virtual Assistant...")
-    print_system_info()
-
-    if not check_internet():
-        sys.exit("🚫 Please connect to the internet and restart the assistant.")
-
-    nltk_thread = initialize_resources()
-
-    # Check or Start Tor
-    if not is_tor_running():
-        if not launch_tor():
-            log.warning("⚠️ Continuing without Tor routing.")
-        else:
-            time.sleep(3)
-
-    # IP Check
-    check_ip_through_proxy(label="Direct")
-    if is_tor_running():
-        check_ip_through_proxy("socks5h://127.0.0.1:9050", label="Tor")
-
-    nltk_thread.join(timeout=15)
-
+# --------------------------- APPLICATION LAUNCH --------------------------- #
+def launch_gui(log):
+    from jarvis import ApplicationManager
     try:
         manager = ApplicationManager()
         manager.run()
     except Exception as e:
         log.error(f"[!] J.A.R.V.I.S. failed to start: {e}")
         sys.exit(1)
+
+
+def set_env(key, value):
+    dotenv.set_key(".env", key, value)
+
+
+def launch_cli():
+    console = ConsoleTerminal()
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+
+        console = Console()
+
+        markdown_text = """
+        # 🚀 Welcome to J.A.R.V.I.S
+
+        **J.A.R.V.I.S** is a modular AI system with the following capabilities:
+
+        - ✅ Natural Language Understanding
+        - 🧠 Autonomous Agent Collaboration
+        - 🔐 Tor-enabled Secure Communication
+        - 🛠️ Developer Tools (CLI + GUI)
+
+        > “The future is here.”
+
+        ---  
+        Built with ❤️ using Python.
+        """
+
+        md = Markdown("[green]" + markdown_text)
+        console.print(md)
+
+        parser = argparse.ArgumentParser(description='J.A.R.V.I.S. CLI Mode')
+        parser.add_argument('--coder', action='store_true', help="🤖 AI-powered code generation")
+        parser.add_argument('--interpreter', action='store_true', help="Natural language interface for computers")
+        parser.add_argument("--settings", action="store_true", help="Settings of the JARVIS CLI")
+        args = parser.parse_args()
+        if args.coder:
+            from terminal.coder import coder_
+            coder_()
+
+        elif args.interpreter:
+            from terminal.interpreter import inter
+            inter()
+
+        elif args.settings:
+            from terminal.settings.llm_selection import llm, LLM_TYPE
+            llm_type, base_url, api_key, selected_model = llm(console)
+            set_env("ENDPOINT", llm_type.value)
+
+            if llm_type == LLM_TYPE.OPENAI:
+                set_env("OPENAI_API_MODEL", selected_model)
+                set_env("OPENAI_API_KEY", api_key)
+                if base_url is not None:
+                    set_env("OPENAI_BASE_URL", base_url)
+
+            elif llm_type == LLM_TYPE.OLLAMA:
+                set_env("OLLAMA_MODEL", selected_model)
+                set_env("OLLAMA_ENDPOINT", base_url)
+
+            elif llm_type == LLM_TYPE.GROQ:
+                set_env('GROQ_API_KEY', api_key)
+                set_env('GROQ_API_MODEL', selected_model)
+
+            elif llm_type == LLM_TYPE.ANTHROPIC:
+                set_env('ANTHROPIC_API_KEY', api_key)
+                set_env('ANTHROPIC_MODEL', selected_model)
+
+            elif llm_type == LLM_TYPE.AZURE:
+                set_env("AZURE_OPENAI_API_KEY", api_key)
+
+            console.print("Settings Saved Successfully")
+            mode = inquirer.select(
+                "Select the Mode:",
+                choices=[
+                    "Interpreter",
+                    "J.A.R.V.I.S. Coder",
+                ],
+                default="J.A.R.V.I.S. Coder"
+            ).execute()
+            if "J.A.R.V.I.S. Coder" in mode:
+                from terminal.coder import coder_
+                coder_()
+            elif "Interpreter" in mode:
+                from terminal.interpreter import inter
+                inter()
+    except (KeyboardInterrupt or Exception) as e:
+        console.print(
+            f"Thank you for using J.A.R.V.I.S. CLI! See you next time! :bye:",
+            style=f"{MAIN_COLOR} bold",
+        )
+
+
+# --------------------------- MAIN FUNCTION --------------------------- #
+def main():
+    try:
+        if len(sys.argv) > 1:
+            launch_cli()
+        else:
+            from config import loggers
+            log = loggers['MAIN']
+            log.info("🤖 Launching J.A.R.V.I.S. Virtual Assistant...")
+            print_system_info(log)
+
+            if not check_internet(log):
+                sys.exit("🚫 Please connect to the internet and restart the assistant.")
+
+            initialize_resources(log)
+
+            if not is_tor_running():
+                if not launch_tor(log):
+                    log.warning("⚠️ Continuing without Tor routing.")
+                else:
+                    time.sleep(3)
+
+            check_ip_through_proxy(label="Direct", log=log)
+            if is_tor_running():
+                check_ip_through_proxy(proxy="socks5h://127.0.0.1:9050", label="Tor", log=log)
+
+
+            launch_gui(log)
+    except KeyboardInterrupt as e:
+        print("Goodbye!")
 
 
 # --------------------------- ENTRY POINT --------------------------- #

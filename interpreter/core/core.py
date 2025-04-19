@@ -17,7 +17,7 @@ from .computer.computer import Computer
 from .default_system_message import default_system_message
 from .llm.llm import Llm
 from .respond import respond
-from .utils.telemetry import send_telemetry
+
 from .utils.truncate_output import truncate_output
 
 
@@ -168,14 +168,6 @@ class OpenInterpreter:
                 message_type = type(
                     message
                 ).__name__  # Only send message type, no content
-                send_telemetry(
-                    "started_chat",
-                    properties={
-                        "in_terminal_interface": self.in_terminal_interface,
-                        "message_type": message_type,
-                        "os_mode": self.os,
-                    },
-                )
 
             if not blocking:
                 chat_thread = threading.Thread(
@@ -202,15 +194,6 @@ class OpenInterpreter:
             self.responding = False
             if self.anonymous_telemetry:
                 message_type = type(message).__name__
-                send_telemetry(
-                    "errored",
-                    properties={
-                        "error": str(e),
-                        "in_terminal_interface": self.in_terminal_interface,
-                        "message_type": message_type,
-                        "os_mode": self.os,
-                    },
-                )
 
             raise
 

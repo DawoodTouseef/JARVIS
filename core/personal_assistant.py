@@ -35,7 +35,7 @@ import threading
 import time
 from config import JARVIS_DIR
 from core.Agent_models import get_model_from_database
-from standard_tools import NextCloudTool
+from core.tools.standard_tools import NextCloudTool
 import  inspect
 
 # Exchange rates for multi-currency support
