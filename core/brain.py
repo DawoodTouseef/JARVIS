@@ -407,15 +407,6 @@ def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> st
     return final_state["final_response"]
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     input_query =  "List the list of installed software in my system?"
     response = get_agent(input_query)
     print(f"JARVIS: {response}")
-=======
-    try:
-        input_query =  "List the software in the system."
-        response = get_agent(input_query)
-        print(f"JARVIS: {response}")
-    except Exception as  e:
-        print(str(e))
->>>>>>> 7b285916add984aca069069a53cf6fdea375ee99
