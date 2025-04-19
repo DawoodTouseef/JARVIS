@@ -28,7 +28,7 @@ Built using modern technologies like **PyQt5, OpenCV, and advanced AI models**, 
 - Enjoy JARVIS’s **trademark humor, personality, and contextual responses**, powered by customizable AI models.  
 
 ### **📂 Persistent Memory System**  
-- Retain and recall past interactions using a **persistent memory framework (`MemorySettings`)**.  
+- Retain and recall past interactions using a **persistent memory framework (`mem0`)**.  
 
 ### **🔌 Modular & Extensible Architecture**  
 - Expand capabilities by integrating **third-party APIs** (weather, news, software management, scheduling, etc.).  
