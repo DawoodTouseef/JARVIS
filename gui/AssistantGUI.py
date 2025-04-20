@@ -35,40 +35,29 @@ from gui.call import CallDialerDialog
 from core.personal_assistant import YahooFinanceTool, DatabaseTool
 from PyQt5.QtGui import QKeySequence
 from gui.integrations import IntegrationsDialog
-import io
-import pyautogui
 from PyQt5.QtCore import  pyqtProperty, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QBrush, QLinearGradient, QFont
 from PyQt5.QtWidgets import (
-    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox,  QDialog
+    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox
 )
-from core.brain import MemorySettings
-import time
 import os
-from config import  stop_event, loggers
-import sounddevice as sd
-from audio.tts_providers.BarkTTS import BarkTTS as Indic_Parler_TTS
-import torch
-import pyttsx4
+from config import  loggers
+
 import numpy as np
-import psutil
-import netifaces
-from datetime import datetime
+
+
 import cv2
-from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
-import requests
-from PIL import Image
-import socket
-import subprocess,platform
+from gui.Objects.AgentWorker import AgentWorker
+from gui.Objects.wakeword import WakeWordWorker
+from gui.Objects.SpeechRecognition import SpeechRecognitionWorker
+from gui.Objects.AlertChecker import AlertCheck
+from gui.Objects.TTSWorker import TTSWorker
+from gui.Objects.Consciousness import ConsciousnessWorker
+from gui.ImagePreview import ImagePreviewDialog
+from gui.secuirty_dashboard import SecurityDashboard
 
-
-if torch.cuda.is_available():
-    tts = Indic_Parler_TTS()
-else:
-    tts = pyttsx4.init()
 log = loggers["GUI"]
-
 
 class HoverButton(QPushButton):
     """Button with hover animations."""
@@ -90,171 +79,6 @@ class HoverButton(QPushButton):
                 color: black;
             }
         """)
-
-
-class SecurityIndicator(QWidget):
-    """Circular security status indicator (Green=Secure, Red=Threat)."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(90, 90)
-        self._status = False
-        self.opacity = 1.0
-
-    def set_status(self, active):
-        """Change security status."""
-        self._status = active
-        self.update()
-
-    def paintEvent(self, event):
-        """Draw security indicator."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QColor(30, 30, 30))
-        painter.drawEllipse(0, 0, 90, 90)
-
-        color = QColor(0, 255, 0) if self._status else QColor(255, 0, 0)
-        painter.setBrush(color)
-        painter.drawEllipse(20, 20, 50, 50)
-
-class SecurityScanThread(QThread):
-    """Thread to perform real security scanning."""
-    scanCompleted = pyqtSignal(int)  # Emits number of detected threats
-
-    def __init__(self, scan_type="quick"):
-        super().__init__()
-        self.scan_type = scan_type
-
-    def run(self):
-        """Runs system security scanning based on OS."""
-        detected_threats = 0
-        os_name = platform.system()
-
-        if os_name == "Windows":
-            detected_threats = self.scan_windows()
-        elif os_name == "Linux":
-            detected_threats = self.scan_linux()
-        elif os_name == "Darwin":  # macOS
-            detected_threats = self.scan_macos()
-
-        self.scanCompleted.emit(detected_threats)
-
-    def scan_windows(self):
-        """Performs a security scan using Windows Defender."""
-        try:
-            scan_cmd = r'powershell -Command "Start-MpScan -ScanType QuickScan"'
-            subprocess.run(scan_cmd, shell=True, check=True)
-
-            result = subprocess.run(
-                r'powershell -Command "Get-MpThreat | Measure-Object"',
-                shell=True, capture_output=True, text=True
-            )
-
-            threats_found = int(result.stdout.strip().split()[-1]) if result.stdout.strip() else 0
-            return threats_found
-
-        except Exception as e:
-            print(f"[Error] Windows Defender Scan Failed: {e}")
-            return 0
-
-    def scan_linux(self):
-        """Performs a security scan using ClamAV on Linux."""
-        try:
-            if os.system("which clamscan > /dev/null 2>&1") != 0:
-                print("[Error] ClamAV is not installed. Install it using 'sudo apt install clamav'")
-                return 0
-
-            os.system("freshclam")
-
-            result = subprocess.run(
-                "clamscan -r --bell -i /home",  # Modify path as needed
-                shell=True, capture_output=True, text=True
-            )
-
-            threats = sum(1 for line in result.stdout.split("\n") if "FOUND" in line)
-            return threats
-
-        except Exception as e:
-            print(f"[Error] ClamAV Scan Failed: {e}")
-            return 0
-
-    def scan_macos(self):
-        """Performs a security scan using ClamAV on macOS."""
-        return self.scan_linux()  # macOS also uses ClamAV
-
-
-class SecurityDashboard(QWidget):
-    """Security dashboard widget."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.total_threats = 0
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setContentsMargins(15, 15, 15, 15)
-
-        self.status_header = QLabel("🛡️ Quantum Security Shield")
-        self.status_header.setStyleSheet("font-size: 18px; color: #00ffff; font-weight: bold;")
-
-        stats_layout = QHBoxLayout()
-        self.threat_count = QLabel("0 Threats Blocked")
-        self.last_scan = QLabel("Last Scan: Never")
-        stats_layout.addWidget(self.threat_count)
-        stats_layout.addWidget(self.last_scan)
-
-        self.security_indicator = QLabel("🟢 Secure")
-        self.security_indicator.setAlignment(Qt.AlignCenter)
-        self.security_indicator.setStyleSheet("font-size: 16px; color: green; font-weight: bold;")
-
-        control_layout = QHBoxLayout()
-        self.quick_scan_btn = QPushButton("🚀 Quick Scan")
-        self.full_scan_btn = QPushButton("🛑 Full Scan")
-        control_layout.addWidget(self.quick_scan_btn)
-        control_layout.addWidget(self.full_scan_btn)
-
-        layout.addWidget(self.status_header)
-        layout.addLayout(stats_layout)
-        layout.addWidget(self.security_indicator, alignment=Qt.AlignCenter)
-        layout.addLayout(control_layout)
-
-        self.setLayout(layout)
-        self.setStyleSheet("""
-            background-color: rgba(40, 40, 40, 220);
-            border-radius: 15px;
-            border: 2px solid #505050;
-        """)
-
-        self.quick_scan_btn.clicked.connect(lambda: self.start_scan("quick"))
-        self.full_scan_btn.clicked.connect(lambda: self.start_scan("full"))
-
-    def start_scan(self, scan_type):
-        """Starts the security scan."""
-        self.security_indicator.setText("🟡 Scanning...")
-        self.security_indicator.setStyleSheet("font-size: 16px; color: orange; font-weight: bold;")
-
-        self.scan_thread = SecurityScanThread(scan_type)
-        self.scan_thread.scanCompleted.connect(self.update_scan_results)
-        self.scan_thread.start()
-
-    def update_scan_results(self, detected_threats):
-        """Updates UI with scan results."""
-        self.total_threats += detected_threats
-        self.threat_count.setText(f"{self.total_threats} Threats Blocked")
-        self.last_scan.setText(f"Last Scan: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-        if detected_threats > 0:
-            self.security_indicator.setText("🔴 Threats Detected!")
-            self.security_indicator.setStyleSheet("font-size: 16px; color: red; font-weight: bold;")
-        else:
-            self.security_indicator.setText("🟢 Secure")
-            self.security_indicator.setStyleSheet("font-size: 16px; color: green; font-weight: bold;")
-
-    def closeEvent(self, a0):
-        self.scan_thread.quit()
-        self.scan_thread.wait()
-
-        a0.accept()
 
 class AnimatedButton(QPushButton):
     """Custom Button with Moving Light Border Effect."""
@@ -308,7 +132,6 @@ class AnimatedButton(QPushButton):
         painter.drawEllipse(self.rect().adjusted(3, 3, -3, -3))  # Adjust for the border
         painter.rotate(angle)
 
-
 class AnimatedLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -343,477 +166,6 @@ class AnimatedLabel(QLabel):
         self.setStyleSheet(f"color: rgba(10, 10, 10, {value});")
 
     opacity = pyqtProperty(float, get_opacity, set_opacity)
-
-
-class WakeWordWorker(QObject):
-    wake_word_detected = pyqtSignal()
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, porcupine, audio_stream, stop_event):
-        super().__init__()
-        self.porcupine = porcupine
-        self.audio_stream = audio_stream
-        self.stop_event = stop_event
-
-    def run(self):
-        try:
-            log.info("Listening for wake word...")
-            while not self.stop_event.is_set():
-                pcm = self.audio_stream.read(self.porcupine.frame_length, exception_on_overflow=False)
-                pcm = struct.unpack("h" * self.porcupine.frame_length, pcm)
-                result = self.porcupine.process(pcm)
-                if result >= 0:
-                    self.wake_word_detected.emit()
-        except Exception as e:
-            self.error_signal.emit(str(e))
-        finally:
-            self.cleanup()
-
-    def cleanup(self):
-        if self.porcupine:
-            self.porcupine.delete()
-        if self.audio_stream:
-            self.audio_stream.stop_stream()
-            self.audio_stream.close()
-
-
-class SpeechRecognitionWorker(QObject):
-    listen_signal = pyqtSignal(str)
-    transcription_signal = pyqtSignal(str)
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, recognizer: sr.Recognizer, microphone: sr.Microphone, stop_event):
-        super().__init__()
-        self.recognizer = recognizer
-        self.microphone = microphone
-        self.stop_event = stop_event
-        self.log = loggers["AUDIO"]
-        self.energy_threshold = 300
-        self.silence_duration = 2  # seconds
-        self.frame_duration_ms = 30  # 30ms per frame
-        self.sample_rate = 16000
-        self.sample_width = 2
-        self.chunk_size = int(self.sample_rate * (self.frame_duration_ms / 1000.0))
-
-    def capture_with_local_vad(self, source):
-        audio_frames = []
-        silence_counter = 0
-
-        stream = source.stream
-        try:
-            while not self.stop_event.is_set():
-                frame = stream.read(self.chunk_size)
-                if not frame:
-                    break
-
-                pcm_data = np.frombuffer(frame, dtype=np.int16)
-                energy = np.sqrt(np.mean(pcm_data ** 2))
-
-                if energy > self.energy_threshold:
-                    audio_frames.append(frame)
-                    silence_counter = 0
-                else:
-                    silence_counter += 1
-
-                if silence_counter > (self.silence_duration * 1000 / self.frame_duration_ms):
-                    break
-        except Exception as e:
-            self.error_signal.emit(f"⚠️ Error during audio capture: {e}")
-            return None
-
-        return sr.AudioData(b''.join(audio_frames), self.sample_rate, self.sample_width)
-
-    def run(self):
-        try:
-            with self.microphone as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=2)
-                self.listen_signal.emit("🎙️ Listening...")
-
-                audio = self.capture_with_local_vad(source)
-
-                if audio is not None:
-                    self.listen_signal.emit("🧠 Recognizing speech...")
-                    transcription = self.recognizer.recognize_whisper(audio, model="base")
-                    self.log.info(f"Transcription: {transcription}")
-                    self.transcription_signal.emit(transcription)
-                else:
-                    self.error_signal.emit("⚠️ No speech detected or audio capture failed.")
-
-        except sr.UnknownValueError:
-            self.log.error("❌ Could not understand the audio.")
-            self.error_signal.emit("❌ Sorry, I couldn't understand what you said.")
-        except sr.RequestError as e:
-            self.log.error(f"🚫 API request error: {e}")
-            self.error_signal.emit(f"🚫 API request error: {e}")
-        except Exception as e:
-            self.error_signal.emit(f"⚠️ Unexpected error occurred: {str(e)}")
-
-class AgentWorker(QObject):
-    response_signal = pyqtSignal(str)
-
-    def __init__(self):
-        super().__init__()
-        self.text = None
-        self.image=None
-    def set_text(self, text):
-        self.text = text
-
-    def set_input(self,image):
-        self.image = image
-
-    def run(self):
-        from core.brain import get_agent
-        from core.vision_agents import vision_agent
-        from core.Agent_models import get_model_from_database,get_vision_model_from_database
-        if self.text is None:
-            if get_vision_model_from_database() is not None:
-                response = vision_agent(images=self.image)
-                log.info(f"Agent Response: {response}")
-                self.response_signal.emit(response)
-            else:
-                self.response_signal.emit("⚠️ Oops! It looks like the model isn't configured yet. Please check the settings and set it up to proceed.")
-
-        log.info(f"Processing input: {self.text}")
-        if get_model_from_database():
-            try:
-                try:
-                    response = get_agent(user_input=self.text,image=self.image)
-                    log.info(f"Agent Response: {response}")
-                    self.response_signal.emit(response)
-                except Exception as e:
-                    response = get_agent(user_input=self.text)
-                    log.info(f"Agent Response: {response}")
-                    self.response_signal.emit(response)
-            except Exception as e:
-                log.error(f"⚠️ An error occurred: {str(e)}")
-                self.response_signal.emit(f"⚠️ An error occurred")
-        else:
-            self.response_signal.emit("⚠️ Oops! It looks like the model isn't configured yet. Please check the settings and set it up to proceed.")
-
-
-
-class AlertCheck(QObject):
-    alert_triggered = pyqtSignal(list)  # Signal to emit triggered alerts (stock and system)
-
-    def __init__(self, db_tool, yahoo_tool, parent=None):
-        super().__init__(parent)
-        self.db_tool = db_tool
-        self.yahoo_tool = yahoo_tool
-        self.running = False
-        # Thresholds for proactive system alerts (customizable via preferences if desired)
-        self.cpu_threshold = 90.0  # Alert if CPU usage > 90%
-        self.memory_threshold = 90.0  # Alert if memory usage > 90%
-        self.battery_threshold = 20.0  # Alert if battery < 20%
-        self.disk_threshold = 90.0  # Alert if disk usage > 90%
-
-    def get_system_sensors(self):
-        """Fetch system metrics using psutil."""
-        try:
-            cpu_usage = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            battery = psutil.sensors_battery()
-            return {
-                "cpu": cpu_usage,
-                "memory": memory.percent,
-                "disk": disk.percent,
-                "battery": battery.percent if battery else 100.0,  # Assume 100% if no battery
-                "power_plugged": battery.power_plugged if battery else True
-            }
-        except Exception as e:
-            return {"error": f"System monitoring failed: {str(e)}"}
-
-    def get_network_status(self):
-        """Check network connectivity using netifaces."""
-        try:
-            gateways = netifaces.gateways()
-            return "connected" if 'default' in gateways and gateways['default'] else "disconnected"
-        except Exception:
-            return "unknown"
-
-    def run(self):
-        from core.personal_assistant import EXCHANGE_RATES  # Assuming EXCHANGE_RATES is defined here
-        self.running = True
-        while self.running:
-            triggered = []  # Collect all alerts (stock + system)
-
-            # 1. Stock Alerts (existing functionality)
-            user_currency_result = self.db_tool._run("get_preference", key="currency", default="USD")
-            user_currency = user_currency_result if user_currency_result in EXCHANGE_RATES else "USD"
-            rate_to_usd = EXCHANGE_RATES[user_currency]
-            alerts = json.loads(self.db_tool._run("get_alerts"))
-            purchases = json.loads(self.db_tool._run("get_purchases_for_alerts"))
-
-            # Stock price target alerts
-            for ticker, target_price, alert_currency in alerts:
-                data = json.loads(self.yahoo_tool._run(ticker))
-                if "price" in data:
-                    usd_price = data["price"]
-                    alert_price_in_usd = target_price / EXCHANGE_RATES.get(alert_currency, 1.0)
-                    if usd_price >= alert_price_in_usd:
-                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
-                        triggered.append(
-                            f"Alert: {data['company']} ({ticker}) is at {user_currency}{converted_price:.2f}, hit your target of {alert_currency}{target_price}"
-                        )
-                        self.db_tool._run("log_notification",
-                                        message=f"Alert triggered for {ticker} at {user_currency}{converted_price:.2f}")
-
-            # Stock profit reminders
-            for ticker, purchase_price, quantity, purchase_currency in purchases:
-                data = json.loads(self.yahoo_tool._run(ticker))
-                if "price" in data:
-                    usd_price = data["price"]
-                    purchase_price_usd = purchase_price / EXCHANGE_RATES.get(purchase_currency, 1.0)
-                    target_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_target_profit", default=0))
-                    min_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_min_profit", default=0))
-                    profit_usd = (usd_price - purchase_price_usd) * quantity
-                    target_price_usd = purchase_price_usd + target_profit
-                    if usd_price >= target_price_usd and profit_usd >= min_profit:
-                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
-                        converted_profit = profit_usd * EXCHANGE_RATES[user_currency]
-                        triggered.append(
-                            f"Reminder: {data['company']} ({ticker}) bought at {purchase_currency}{purchase_price} is now {user_currency}{converted_price:.2f}. Selling yields profit of {user_currency}{converted_profit:.2f} (≥ {user_currency}{min_profit})."
-                        )
-                        self.db_tool._run("log_notification",
-                                        message=f"Profit reminder for {ticker}: {user_currency}{converted_profit:.2f}")
-
-            # 2. System Monitoring and Proactive Updates
-            sensors = self.get_system_sensors()
-            network_status = self.get_network_status()
-
-            # CPU usage alert
-            if "cpu" in sensors and sensors["cpu"] > self.cpu_threshold:
-                triggered.append(f"Warning: CPU usage at {sensors['cpu']:.1f}%, exceeding {self.cpu_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High CPU usage detected: {sensors['cpu']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Memory usage alert
-            if "memory" in sensors and sensors["memory"] > self.memory_threshold:
-                triggered.append(f"Warning: Memory usage at {sensors['memory']:.1f}%, exceeding {self.memory_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High memory usage detected: {sensors['memory']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Disk usage alert
-            if "disk" in sensors and sensors["disk"] > self.disk_threshold:
-                triggered.append(f"Warning: Disk usage at {sensors['disk']:.1f}%, exceeding {self.disk_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High disk usage detected: {sensors['disk']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Battery level alert (if not plugged in)
-            if "battery" in sensors and sensors["battery"] < self.battery_threshold and not sensors["power_plugged"]:
-                triggered.append(f"Warning: Battery level at {sensors['battery']:.1f}%, below {self.battery_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"Low battery detected: {sensors['battery']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Network disconnection alert
-            if network_status == "disconnected":
-                triggered.append("Warning: Network connection lost.")
-                self.db_tool._run("log_notification",
-                                message=f"Network disconnection detected at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Emit all triggered alerts (stock + system)
-            if triggered:
-                self.alert_triggered.emit(triggered)
-
-            # Sleep for 10 seconds (consistent with stock checks)
-            QThread.msleep(10000)
-
-    def stop(self):
-        self.running = False
-
-class TTSWorker(QObject):
-    finished_signal = pyqtSignal()
-
-    def __init__(self):
-        super().__init__()
-        self.text = Queue()
-
-    def set_text(self, text):
-        self.text.put(text)
-
-    def run(self):
-        if self.text.empty():
-            self.finished_signal.emit()
-            return
-
-        if stop_event.is_set():
-            sd.stop()
-            stop_event.clear()
-
-        current_text = self.text.get()
-        loggers["AUDIO"].info(f"Speaking: {current_text}")
-
-        try:
-            if torch.cuda.is_available():
-                audio, sample_rate = tts.run(current_text)
-                sd.play(data=audio, samplerate=sample_rate)
-                sd.wait(ignore_errors=True)
-                sd.stop()
-            else:
-                tts.say(current_text)
-                tts.runAndWait()
-        except Exception as e:
-            loggers["AUDIO"].error(f"TTS error: {e}")
-        finally:
-            self.finished_signal.emit()
-
-from core.Agent_models import get_model
-class ConsciousnessWorker(QObject):
-    update_signal = pyqtSignal(str)  # Proactive updates
-    image_signal = pyqtSignal(list)  # Image data for processing
-
-    def __init__(self, stop_event):
-        super().__init__()
-        self.stop_event = stop_event
-        self.camera = cv2.VideoCapture(0)
-        self.last_screenshot_time = 0
-        self.memory = MemorySettings()
-        self.llm = get_model()
-
-    def get_system_sensors(self):
-        cpu_usage = psutil.cpu_percent(interval=1)
-        memory = psutil.virtual_memory()
-        battery = psutil.sensors_battery()
-        disk = psutil.disk_usage('/')
-        return {
-            "CPU Usage": f"{cpu_usage}%",
-            "Memory Usage": f"{memory.percent}%",
-            "Battery": f"{battery.percent}% (Plugged: {battery.power_plugged})" if battery else "N/A",
-            "Disk Usage": f"{disk.percent}%"
-        }
-
-    def get_network_status(self):
-        try:
-            hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            gateways = netifaces.gateways()
-            default_gateway = gateways['default'][netifaces.AF_INET][0] if 'default' in gateways else "Unknown"
-            return {
-                "IP Address": ip,
-                "Gateway": default_gateway,
-                "Internet": "Connected" if requests.get("http://www.google.com", timeout=2).status_code == 200 else "Disconnected"
-            }
-        except:
-            return {"Internet": "Status unknown"}
-
-    def capture_camera_feed(self):
-        if self.camera.isOpened():
-            ret, frame = self.camera.read()
-            if ret:
-                emotion = self.detect_emotion(frame)
-                self.memory.add_memory(f"Detected emotion: {emotion}", source="emotion")
-
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb)
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG")
-                return [buffer.getvalue()]
-        return None
-
-    def detect_emotion(self, frame):
-        from deepface import DeepFace
-        try:
-            result = DeepFace.analyze(frame, actions=["emotion","gender"], enforce_detection=False)
-            result = result[0] if isinstance(result, list) else result
-            emotion = result.get("dominant_emotion", "neutral")
-            return emotion
-        except Exception as e:
-            log.warning(f"[Emotion Detection] Error: {e}")
-            return "neutral"
-
-    def capture_screenshot(self):
-        screenshot = pyautogui.screenshot()
-        buffer = io.BytesIO()
-        screenshot.save(buffer, format="PNG")
-        return [buffer.getvalue()]
-
-    def suggest_from_llm(self, query="current context"):
-        try:
-            memories = self.memory.search_memory(query, limit=3)
-            prompt = "\n".join([f"{m['memory']}" for m in memories])
-            prompt += "\n\nBased on this context, provide one suggestion to enhance user experience or productivity."
-            response = self.llm.invoke(prompt)
-            return response.strip()
-        except Exception as e:
-            log.error(f"LLM suggestion error: {e}")
-            return None
-
-    def run(self):
-        log.info("🧠 Consciousness thread running...")
-        while not self.stop_event.is_set():
-            try:
-                sensors = self.get_system_sensors()
-                network = self.get_network_status()
-
-                context = (
-                    f"System: {', '.join([f'{k}: {v}' for k, v in sensors.items()])} | "
-                    f"Network: {', '.join([f'{k}: {v}' for k, v in network.items()])}"
-                )
-                self.memory.add_memory(context, source="system")
-
-                if "Battery" in sensors and float(sensors["Battery"].split("%")[0]) < 20:
-                    suggestion = "⚠️ Battery critically low. Recommend plugging in or optimizing power usage."
-                    self.memory.add_memory(suggestion, source="proactive")
-                    self.update_signal.emit(suggestion)
-
-                if network.get("Internet") == "Disconnected":
-                    suggestion = "🌐 Network offline. Shall I troubleshoot connectivity?"
-                    self.memory.add_memory(suggestion, source="proactive")
-                    self.update_signal.emit(suggestion)
-
-                # Camera capture & emotion
-                camera_feed = self.capture_camera_feed()
-                if camera_feed:
-                    self.image_signal.emit(camera_feed)
-
-                # Screenshot every 2 mins
-                now = time.time()
-                if now - self.last_screenshot_time > 120:
-                    screenshot = self.capture_screenshot()
-                    self.image_signal.emit(screenshot)
-                    self.last_screenshot_time = now
-
-                # 🧠 LLM Suggestion
-                suggestion = self.suggest_from_llm("mood or emotional support")
-                if suggestion:
-                    self.memory.add_memory(suggestion, source="llm_suggestion")
-                    self.update_signal.emit(f"💡 Suggestion: {suggestion}")
-
-                time.sleep(300)  # Run every 5 minutes
-            except Exception as e:
-                log.error(f"Consciousness error: {e}")
-
-    def cleanup(self):
-        if self.camera.isOpened():
-            self.camera.release()
-
-class ImagePreviewDialog(QDialog):
-    def __init__(self, image, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Captured Image Preview")
-        self.setModal(False)  # Non-modal so code can continue
-
-        # Convert OpenCV BGR image to RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # Convert to QImage
-        h, w, ch = image_rgb.shape
-        bytes_per_line = ch * w
-        q_image = QImage(image_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-
-        # Create pixmap and scale it
-        pixmap = QPixmap.fromImage(q_image)
-        pixmap = pixmap.scaled(640, 480, Qt.KeepAspectRatio)
-
-        # Setup UI
-        layout = QVBoxLayout()
-        self.image_label = QLabel()
-        self.image_label.setPixmap(pixmap)
-        layout.addWidget(self.image_label)
-        self.setLayout(layout)
-
-        # Adjust window size to image
-        self.adjustSize()
 
 # Main Window
 class AssistantGUI(QMainWindow):
@@ -913,6 +265,16 @@ class AssistantGUI(QMainWindow):
 
         # Start the thread
         self.consciousness_thread.start()
+
+
+    def setup_tray_icon(self):
+        self.tray = QSystemTrayIcon(QIcon("icon.png"), self)
+        self.tray.setVisible(True)
+        tray_menu = QMenu()
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.exit_application)
+        tray_menu.addAction(exit_action)
+        self.tray.setContextMenu(tray_menu)
 
     def process_image_input(self, image_data):
         if not self.agent_thread.isRunning():
@@ -1116,10 +478,6 @@ class AssistantGUI(QMainWindow):
             self.stacked_layout.setCurrentIndex(0)
             self.current_view = "assistant"
 
-    def update_security_indicator(self, status):
-        """Update Security Indicator based on System Status"""
-        self.security_indicator.set_status(status['active'])
-        self.animate_security_indicator(status['active'])
 
     def record(self):
         self.gl_widget.toggle_animation()
@@ -1145,19 +503,6 @@ class AssistantGUI(QMainWindow):
                     self.speech_thread.wait()
             except Exception as e:
                 self.display_error(f"Failed to stop recording: {e}")
-
-    def animate_security_indicator(self, active):
-        """Add Fade Effect on Security Indicator"""
-        animation = QPropertyAnimation(self.security_indicator, b"opacity")
-        animation.setDuration(500)
-        animation.setStartValue(0.5 if active else 1.0)
-        animation.setEndValue(1.0 if active else 0.5)
-        animation.start()
-
-    def handle_threat(self, threat_info):
-        """Handle Detected Threats"""
-        self.text_label.start_fade_animation(f"⚠️ Threat Detected: {threat_info['file_path']}")
-        self.text_label.setStyleSheet("color: #ff4444; font-weight: bold;")
 
     def on_wake_word_detected(self):
         """Handle wake word detection."""

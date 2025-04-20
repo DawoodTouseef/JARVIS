@@ -86,79 +86,99 @@ class FontRenderer:
 
 
 
+
+
+
+
+# Add this at the top
+import colorsys
+import math
+
 class AssistantOpenGLWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(650, 800)
 
-        self.base_color = QColor(100, 150, 255)
+        self.angle = 0
+        self.pulse_intensity = 0.0
+        self.text_opacity = 0.0
+        self.fade_in = True
+        self.smoke_particles = []
+        self.orbit_angle = 0
+        self.hue = 0
+        self.animation_running=False
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_animation)
         self.timer.start(30)
 
-        self.light_mode = True
-
-        self.animation_running = False
-        self.smoke_particles = []
-        self.angle = 0
-        self.dragging = False
-        self.offset = QPoint()
         from config import JARVIS_DIR
-        # **Text Animation Variables**
-        self.font_renderer = FontRenderer(os.path.join(JARVIS_DIR,"fonts","Monomakh","Monomakh-Regular.ttf"), 18)  # **Font size set to 18px**
-        self.text_opacity = 0.0
-        self.fade_in = True
+        self.font_renderer = FontRenderer(
+            os.path.join(JARVIS_DIR, "fonts", "Monomakh", "Monomakh-Regular.ttf"), 18
+        )
+
         self.text_timer = QTimer(self)
         self.text_timer.timeout.connect(self.update_text_opacity)
         self.text_timer.start(50)
 
     def initializeGL(self):
-        """Initialize OpenGL settings."""
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
-        glLightfv(GL_LIGHT0, GL_POSITION, [0.0, 0.0, 1.0, 0.0])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 1.0, 1.0])
+
+        glLightfv(GL_LIGHT0, GL_POSITION, [0.0, 0.0, 2.0, 1.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.3, 1.0])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.5, 1.5, 1.5, 1.0])
 
     def resizeGL(self, w, h):
-        """Resize OpenGL viewport."""
         glViewport(0, 0, w, h)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
         gluPerspective(45, w / h, 0.1, 50.0)
         glMatrixMode(GL_MODELVIEW)
 
-    def paintGL(self):
-        """Render OpenGL scene."""
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glLoadIdentity()
-        gluLookAt(0.0, 0.0, 2.5, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
-
-        # Transparent Background
-        glClearColor(0.0, 0.0, 0.0, 0.0)
-
-        self.draw_3d_sphere()
-        self.draw_smoke_effect()
-        self.font_renderer.render_text("Hello, I am JARVIS", -0.3, -0.8, self.text_opacity)  # Positioned below the sphere
+    def get_current_color(self):
+        self.hue = (self.hue + 1) % 360
+        r, g, b = colorsys.hsv_to_rgb(self.hue / 360.0, 1, 1)
+        return [r, g, b]
 
     def draw_3d_sphere(self):
-        """Draw the rotating 3D sphere."""
         glPushMatrix()
         glRotatef(self.angle, 0, 1, 0)
-        glMaterialfv(GL_FRONT, GL_DIFFUSE, [self.base_color.redF(), self.base_color.greenF(), self.base_color.blueF(), 1.0])
+        r, g, b = self.get_current_color()
+        intensity = 0.5 + 0.5 * math.sin(self.angle * math.pi / 180)
+        glMaterialfv(GL_FRONT, GL_DIFFUSE, [r * intensity, g * intensity, b * intensity, 1.0])
         quadric = gluNewQuadric()
-        gluSphere(quadric, 0.5, 50, 50)
+        gluSphere(quadric, 0.5, 64, 64)
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
-    def draw_smoke_effect(self):
-        """Draw animated smoke particles."""
+    def draw_orbiting_ring(self):
         glPushMatrix()
-        for particle in self.smoke_particles:
-            x, y, z, size, alpha = particle
-            glColor4f(self.base_color.redF(), self.base_color.greenF(), self.base_color.blueF(), alpha)
+        glRotatef(self.orbit_angle, 0, 0, 1)
+        glColor4f(1.0, 1.0, 1.0, 0.3)
+        glBegin(GL_LINE_LOOP)
+        for i in range(100):
+            angle = 2.0 * math.pi * i / 100
+            x = 0.8 * math.cos(angle)
+            y = 0.8 * math.sin(angle)
+            glVertex3f(x, y, 0)
+        glEnd()
+        glPopMatrix()
+
+    def draw_rotating_light_pulses(self):
+        glPushMatrix()
+        glRotatef(self.angle * 2, 0, 1, 0)
+        glColor4f(1.0, 1.0, 1.0, 0.15 + 0.15 * math.sin(self.angle * math.pi / 90))
+        gluDisk(gluNewQuadric(), 0.6, 0.7, 50, 1)
+        glPopMatrix()
+
+    def draw_smoke_effect(self):
+        glPushMatrix()
+        for x, y, z, size, alpha in self.smoke_particles:
+            glColor4f(1.0, 1.0, 1.0, alpha)
             glBegin(GL_QUADS)
             glVertex3f(x - size, y - size, z)
             glVertex3f(x + size, y - size, z)
@@ -166,50 +186,48 @@ class AssistantOpenGLWidget(QOpenGLWidget):
             glVertex3f(x - size, y + size, z)
             glEnd()
         glPopMatrix()
+
+    def paintGL(self):
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glLoadIdentity()
+        gluLookAt(0.0, 0.0, 2.5, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+
+        self.draw_3d_sphere()
+        self.draw_orbiting_ring()
+        self.draw_rotating_light_pulses()
+        self.draw_smoke_effect()
+        self.font_renderer.render_text("Hello, I am JARVIS", -0.3, -0.8, self.text_opacity)
+
     def generate_particles(self):
-        particles = []
-        for _ in range(100):
-            x = random.uniform(-0.5, 0.5)
-            y = random.uniform(-0.5, 0.5)
-            z = random.uniform(-0.5, 0.5)
-            size = random.uniform(0.01, 0.03)
-            alpha = random.uniform(0.3, 0.6)
-            particles.append([x, y, z, size, alpha])
-        return particles
+        return [
+            [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5),
+             random.uniform(0.01, 0.03), random.uniform(0.2, 0.5)] for _ in range(100)
+        ]
 
     def update_particles(self):
-        for particle in self.smoke_particles:
-            particle[1] += 0.01  # Move upwards
-            particle[4] -= 0.01  # Fade out
-            if particle[4] <= 0:
-                particle[0] = random.uniform(-0.5, 0.5)
-                particle[1] = random.uniform(-0.5, 0.5)
-                particle[2] = random.uniform(-0.5, 0.5)
-                particle[3] = random.uniform(0.01, 0.03)
-                particle[4] = random.uniform(0.3, 0.6)
+        for p in self.smoke_particles:
+            p[1] += 0.005
+            p[4] -= 0.01
+            if p[4] <= 0:
+                p[:] = [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5),
+                        random.uniform(0.01, 0.03), random.uniform(0.3, 0.6)]
 
     def update_animation(self):
-        """Update animation states."""
-        self.angle += 1
-        if self.angle >= 360:
-            self.angle = 0
-
+        self.angle = (self.angle + 1) % 360
+        self.orbit_angle = (self.orbit_angle + 1.5) % 360
         self.update_particles()
         self.update()
 
     def update_text_opacity(self):
-        """Animate text opacity for fade in/out effect."""
         if self.fade_in:
             self.text_opacity += 0.02
             if self.text_opacity >= 1.0:
-                self.text_opacity = 1.0
                 self.fade_in = False
         else:
             self.text_opacity -= 0.02
             if self.text_opacity <= 0.0:
-                self.text_opacity = 0.0
                 self.fade_in = True
-
         self.update()
 
     def toggle_animation(self):
