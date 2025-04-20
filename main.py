@@ -11,18 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
-import sys
-import platform
-import subprocess
-import time
-import requests
-import nltk, dotenv
+import dotenv
 import warnings
-import argparse
-from coder.cli.console_terminal import ConsoleTerminal, MAIN_COLOR
-from InquirerPy import inquirer
-
 # --------------------------- ENVIRONMENT --------------------------- #
 dotenv.load_dotenv()
 warnings.filterwarnings("ignore")
@@ -30,6 +20,8 @@ warnings.filterwarnings("ignore")
 # --------------------------- SYSTEM UTILITIES --------------------------- #
 def print_system_info(log):
     from config import VERSION
+    import platform
+    import os
     log.info("🧠 System Diagnostics:")
     log.info(f"   🖥️ OS        : {platform.system()} {platform.release()}")
     log.info(f"   🐍 Python    : {platform.python_version()}")
@@ -37,6 +29,7 @@ def print_system_info(log):
     log.info(f"   🤖 J.A.R.V.I.S: {VERSION}")
 
 def check_internet(log, timeout=5):
+    import requests
     try:
         log.info("🌐 Checking internet connectivity...")
         requests.get("http://example.com", timeout=timeout)
@@ -47,6 +40,7 @@ def check_internet(log, timeout=5):
         return False
 
 def download_nltk_resources(log):
+    import nltk
     try:
         log.info("📥 Downloading NLTK resources...")
         nltk.download('punkt', quiet=True)
@@ -59,8 +53,7 @@ def download_nltk_resources(log):
 
 def initialize_resources(log):
     from jarvis import run_migrations
-    from whisper import load_model
-    import torch
+    import sys
     try:
         log.info("🛠️ Running database migrations...")
         run_migrations()
@@ -73,6 +66,7 @@ def initialize_resources(log):
 
 # --------------------------- TOR FUNCTIONS --------------------------- #
 def is_tor_running():
+    import requests
     try:
         requests.get("http://httpbin.org/ip",
                      proxies={"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}, timeout=5)
@@ -81,6 +75,10 @@ def is_tor_running():
         return False
 
 def launch_tor(log):
+    import platform
+    import os
+    import subprocess
+    import time
     log.info("🕵️ Tor not running. Attempting to start Tor...")
     try:
         if platform.system() == "Windows":
@@ -111,6 +109,7 @@ def launch_tor(log):
         return False
 
 def check_ip_through_proxy(log, proxy=None, label="Direct"):
+    import requests
     try:
         proxies = {'http': proxy, 'https': proxy} if proxy else None
         log.info(f"🌍 Checking IP via {label} connection...")
@@ -123,24 +122,25 @@ def check_ip_through_proxy(log, proxy=None, label="Direct"):
 # --------------------------- APPLICATION LAUNCH --------------------------- #
 def launch_gui(log):
     from jarvis import ApplicationManager
+    from sys import exit
     try:
         manager = ApplicationManager()
         manager.run()
     except Exception as e:
         log.error(f"[!] J.A.R.V.I.S. failed to start: {e}")
-        sys.exit(1)
+        exit(1)
 
 def set_env(key, value):
     dotenv.set_key(".env", key, value)
 
 def launch_cli():
-    console = ConsoleTerminal()
+    from coder.cli.console_terminal import  MAIN_COLOR
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from InquirerPy import inquirer
+    from argparse import ArgumentParser
+    console = Console()
     try:
-        from rich.console import Console
-        from rich.markdown import Markdown
-
-        console = Console()
-
         markdown_text = """
         # 🚀 Welcome to J.A.R.V.I.S
 
@@ -160,7 +160,7 @@ def launch_cli():
         md = Markdown("[green]" + markdown_text)
         console.print(md)
 
-        parser = argparse.ArgumentParser(description='J.A.R.V.I.S. CLI Mode')
+        parser = ArgumentParser(description='J.A.R.V.I.S. CLI Mode')
         parser.add_argument('--coder', action='store_true', help="🤖 AI-powered code generation")
         parser.add_argument('--interpreter', action='store_true', help="Natural language interface for computers")
         parser.add_argument("--settings", action="store_true", help="Settings of the JARVIS CLI")
@@ -222,8 +222,10 @@ def launch_cli():
 
 # --------------------------- MAIN FUNCTION --------------------------- #
 def main():
+    from sys import argv,exit
+    from time import sleep
     try:
-        if len(sys.argv) > 1:
+        if len(argv) > 1:
             launch_cli()
         else:
             from config import loggers
@@ -232,7 +234,7 @@ def main():
             print_system_info(log)
 
             if not check_internet(log):
-                sys.exit("🚫 Please connect to the internet and restart the assistant.")
+                exit("🚫 Please connect to the internet and restart the assistant.")
 
             initialize_resources(log)
 
@@ -240,7 +242,7 @@ def main():
                 if not launch_tor(log):
                     log.warning("⚠️ Continuing without Tor routing.")
                 else:
-                    time.sleep(3)
+                    sleep(3)
 
             check_ip_through_proxy(label="Direct", log=log)
             if is_tor_running():

@@ -61,7 +61,7 @@ class TaskTypeDetector:
         Output only the category.
         """
         llm_info = get_vision_model_from_database()
-        llm = LLM(model="openai/meta-llama/llama-4-scout-17b-16e-instruct", base_url=llm_info.url, api_key=llm_info.api_key)
+        llm = LLM(model=f"openai/{llm_info.name}", base_url=llm_info.url, api_key=llm_info.api_key)
         response = llm.call([{"role": "user", "content": prompt}])
         task_type = response.strip()
         return task_type if task_type in ["object_detection", "image_to_text", "facial_analysis", "all"] else "all"
@@ -168,7 +168,7 @@ class VisionAnalysisTool(BaseTool):
 # ---------------------------- Vision Agent Pipeline ----------------------------
 def vision_agent(image_inputs, user_input: str):
     model_info = get_vision_model_from_database()
-    llm = LLM(model="openai/meta-llama/llama-4-scout-17b-16e-instruct", base_url=model_info.url, api_key=model_info.api_key)
+    llm = LLM(model=f"openai/{model_info.name}", base_url=model_info.url, api_key=model_info.api_key)
 
     vision_agent = Agent(
         role="Vision Analyzer",
@@ -241,32 +241,3 @@ if __name__ == "__main__":
     captured = capture_image_from_cam()
     output = vision_agent(captured, input_query)
     print(output)
-
-
-if __name__ == "__main__":
-    import cv2
-    from PIL import Image
-    import io
-    camera = cv2.VideoCapture(0)
-    def capture_camera_feed():
-        if camera.isOpened():
-            ret, frame = camera.read()
-            if ret:
-                # Convert to PIL Image and save temporarily
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb)
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG")
-                return [buffer.getvalue()]  # Return as a list for vision_agent compatibility
-        return None
-    # Example test with sample image
-    test_image = capture_camera_feed()
-    result = vision_agent(
-        prompt="Analyze this image and explain the scenario of this image.",
-        images=test_image
-    )
-    if result:
-        print("Analysis Result:")
-        print(result)
-    else:
-        print("Failed to process image")
