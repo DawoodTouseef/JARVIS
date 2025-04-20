@@ -1,7 +1,19 @@
+# Copyright 2025 Dawood Thouseef
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 import os
 import sys
 import platform
-import threading
 import subprocess
 import time
 import requests
@@ -15,7 +27,6 @@ from InquirerPy import inquirer
 dotenv.load_dotenv()
 warnings.filterwarnings("ignore")
 
-
 # --------------------------- SYSTEM UTILITIES --------------------------- #
 def print_system_info(log):
     from config import VERSION
@@ -24,7 +35,6 @@ def print_system_info(log):
     log.info(f"   🐍 Python    : {platform.python_version()}")
     log.info(f"   📂 Directory : {os.getcwd()}")
     log.info(f"   🤖 J.A.R.V.I.S: {VERSION}")
-
 
 def check_internet(log, timeout=5):
     try:
@@ -36,7 +46,6 @@ def check_internet(log, timeout=5):
         log.error("❌ No internet connection.")
         return False
 
-
 def download_nltk_resources(log):
     try:
         log.info("📥 Downloading NLTK resources...")
@@ -47,7 +56,6 @@ def download_nltk_resources(log):
         log.info("✅ NLTK resources ready.")
     except Exception as e:
         log.warning(f"[!] NLTK download error: {e}")
-
 
 def initialize_resources(log):
     from jarvis import run_migrations
@@ -63,7 +71,6 @@ def initialize_resources(log):
 
     download_nltk_resources(log)
 
-
 # --------------------------- TOR FUNCTIONS --------------------------- #
 def is_tor_running():
     try:
@@ -72,7 +79,6 @@ def is_tor_running():
         return True
     except:
         return False
-
 
 def launch_tor(log):
     log.info("🕵️ Tor not running. Attempting to start Tor...")
@@ -104,7 +110,6 @@ def launch_tor(log):
         log.error(f"❌ Tor startup failed: {e}")
         return False
 
-
 def check_ip_through_proxy(log, proxy=None, label="Direct"):
     try:
         proxies = {'http': proxy, 'https': proxy} if proxy else None
@@ -114,7 +119,6 @@ def check_ip_through_proxy(log, proxy=None, label="Direct"):
         log.info(f"🌐 {label} IP: {ip}")
     except Exception as e:
         log.warning(f"[!] {label} IP check failed: {e}")
-
 
 # --------------------------- APPLICATION LAUNCH --------------------------- #
 def launch_gui(log):
@@ -126,10 +130,8 @@ def launch_gui(log):
         log.error(f"[!] J.A.R.V.I.S. failed to start: {e}")
         sys.exit(1)
 
-
 def set_env(key, value):
     dotenv.set_key(".env", key, value)
-
 
 def launch_cli():
     console = ConsoleTerminal()
@@ -218,7 +220,6 @@ def launch_cli():
             style=f"{MAIN_COLOR} bold",
         )
 
-
 # --------------------------- MAIN FUNCTION --------------------------- #
 def main():
     try:
@@ -249,7 +250,6 @@ def main():
             launch_gui(log)
     except KeyboardInterrupt as e:
         print("Goodbye!")
-
 
 # --------------------------- ENTRY POINT --------------------------- #
 if __name__ == "__main__":
