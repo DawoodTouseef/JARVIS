@@ -403,7 +403,7 @@ def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> st
         "audio": audio,
         "context": ""
     }
-    final_state = software_node(initial_state)
+    final_state = graph.invoke(initial_state)
     return final_state["final_response"]
 
 if __name__ == "__main__":
