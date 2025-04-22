@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from PyQt5.QtCore import QObject, QThread
+from PyQt5.QtCore import  QThread
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction,QStackedLayout
 from config import JARVIS_DIR
@@ -24,9 +24,7 @@ import pyaudio
 import pvporcupine
 import json
 import threading
-from queue import Queue
 from utils.models.users import Users
-import struct
 import speech_recognition as sr
 from PyQt5.QtCore import  QTimer, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
@@ -35,10 +33,10 @@ from gui.call import CallDialerDialog
 from core.personal_assistant import YahooFinanceTool, DatabaseTool
 from PyQt5.QtGui import QKeySequence
 from gui.integrations import IntegrationsDialog
-from PyQt5.QtCore import  pyqtProperty, pyqtSignal
+from PyQt5.QtCore import  pyqtProperty
 from PyQt5.QtGui import QColor, QPainter, QBrush, QLinearGradient, QFont
 from PyQt5.QtWidgets import (
-    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox
+    QWidget, QPushButton, QLabel, QVBoxLayout, QMessageBox
 )
 import os
 from config import  loggers
@@ -171,11 +169,8 @@ class AnimatedLabel(QLabel):
 class AssistantGUI(QMainWindow):
     def __init__(self, login_page):
         super().__init__()
-        self.setGeometry(100, 100, 800, 800)
-        self.setWindowTitle("J.A.R.V.I.S.")
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
+        self.init_window()
+
         self.recognition_running = False
         self.stop_recognition = threading.Event()
         self.login_page = login_page
@@ -194,77 +189,65 @@ class AssistantGUI(QMainWindow):
         self.text_label.setFont(QFont("Arial", 18, QFont.Bold))
         self.text_label.start_fade_animation("Hello, I am JARVIS")
 
-        self.security_dashboard = SecurityDashboard(self)
-        self.security_dashboard.setGeometry(20, 150, 610, 200)
+        self.setup_tray_icon()
+        self.setup_threads()
+        self.setup_signal_connections()
+        self.start_background_threads()
 
-        self.tray = QSystemTrayIcon()
-        self.tray.setIcon(QIcon("icon.png"))  # Replace with your icon path
-        self.tray.setVisible(True)
-        self.tray_menu = QMenu()
+    def init_window(self):
+        self.setGeometry(100, 100, 800, 800)
+        self.setWindowTitle("J.A.R.V.I.S.")
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
 
-        # Add an exit option
-        exit_action = QAction("Exit", self.tray_menu)
-        exit_action.triggered.connect(self.exit_application)
-        self.tray_menu.addAction(exit_action)
-
-        self.tray.setContextMenu(self.tray_menu)
-
-        if self.audio_stream is not None:
-            self.wake_word_thread = QThread()
-            self.wake_word_worker = WakeWordWorker(self.porcupine, self.audio_stream, self.stop_recognition)
-            self.wake_word_worker.moveToThread(self.wake_word_thread)
-            self.wake_word_worker.wake_word_detected.connect(self.on_wake_word_detected)
-            self.wake_word_worker.error_signal.connect(self.display_error)
-            self.wake_word_thread.started.connect(self.wake_word_worker.run)
-            self.wake_word_thread.start()
-
+    def setup_threads(self):
         self.speech_thread = QThread()
         self.speech_worker = SpeechRecognitionWorker(self.recognizer, self.microphone, self.stop_recognition)
         self.speech_worker.moveToThread(self.speech_thread)
-        self.speech_worker.transcription_signal.connect(self.start_agent_processing)
-        self.speech_worker.listen_signal.connect(self.display_error)
-        self.speech_worker.error_signal.connect(self.display_error)
-        self.speech_thread.started.connect(self.speech_worker.run)
 
         self.agent_thread = QThread()
         self.agent_worker = AgentWorker()
         self.agent_worker.moveToThread(self.agent_thread)
-        self.agent_worker.response_signal.connect(self.start_tts)
-        self.agent_thread.started.connect(self.agent_worker.run)
-        # Note: started signal not connected directly to run due to parameter issue
 
         self.tts_thread = QThread()
         self.tts_worker = TTSWorker()
         self.tts_worker.moveToThread(self.tts_thread)
-        self.tts_worker.finished_signal.connect(self.tts_finished)
-        self.tts_thread.started.connect(self.tts_worker.run)
-        # Note: started signal not connected directly to run due to parameter issue
 
-        self.db_tool = DatabaseTool()
-        self.yahoo_tool = YahooFinanceTool()
-
-        # Set up the worker and thread
         self.alert_thread = QThread()
-        self.alert_checker = AlertCheck(self.db_tool, self.yahoo_tool)
+        self.alert_checker = AlertCheck(DatabaseTool(), YahooFinanceTool())
         self.alert_checker.moveToThread(self.alert_thread)
 
-        # Connect signals
-        self.alert_thread.started.connect(self.alert_checker.run)
-        self.alert_checker.alert_triggered.connect(self.handle_alerts)
-
-        # Start the thread
-        self.alert_thread.start()
-
-        # Consciousness Thread
         self.consciousness_thread = QThread()
         self.consciousness_worker = ConsciousnessWorker(self.stop_recognition)
         self.consciousness_worker.moveToThread(self.consciousness_thread)
+
+        if self.audio_stream:
+            self.wake_word_thread = QThread()
+            self.wake_word_worker = WakeWordWorker(self.porcupine, self.audio_stream, self.stop_recognition)
+            self.wake_word_worker.moveToThread(self.wake_word_thread)
+
+    def setup_signal_connections(self):
+        self.speech_worker.transcription_signal.connect(self.start_agent_processing)
+        self.speech_worker.listen_signal.connect(self.display_error)
+        self.speech_worker.error_signal.connect(self.display_error)
+
+        self.agent_worker.response_signal.connect(self.start_tts)
+        self.tts_worker.finished_signal.connect(self.tts_finished)
+
+        self.alert_checker.alert_triggered.connect(self.handle_alerts)
         self.consciousness_worker.update_signal.connect(self.display_proactive_update)
         self.consciousness_worker.image_signal.connect(self.process_image_input)
-        self.consciousness_thread.started.connect(self.consciousness_worker.run)
 
-        # Start the thread
+        if self.audio_stream:
+            self.wake_word_worker.wake_word_detected.connect(self.on_wake_word_detected)
+            self.wake_word_worker.error_signal.connect(self.display_error)
+
+    def start_background_threads(self):
+        self.alert_thread.start()
         self.consciousness_thread.start()
+        if self.audio_stream:
+            self.wake_word_thread.start()
 
 
     def setup_tray_icon(self):
@@ -367,7 +350,7 @@ class AssistantGUI(QMainWindow):
 
         self.gl_widget = AssistantOpenGLWidget(self)
         self.security_dashboard = SecurityDashboard(self)
-
+        self.security_dashboard.setGeometry(20, 150, 610, 200)
         self.stacked_layout.addWidget(self.gl_widget)  # index 0
         self.stacked_layout.addWidget(self.security_dashboard)  # index 1
 
@@ -679,16 +662,40 @@ class AssistantGUI(QMainWindow):
             self.record_button.setIcon(QIcon(mic_svg))  # Update icon for running animation
 
     def closeEvent(self, event):
-        """Handle window close event."""
+        """Handle window close event and show shutdown splash."""
+        from splash_screen import SplashScreen
+        from PyQt5.QtWidgets import QApplication
+        from time import sleep
+
+        splash = SplashScreen(os.path.join(JARVIS_DIR,"assests","splash-jarvis-logo.jpg"), message="Shutting down J.A.R.V.I.S...")
+        splash.show()
+        QApplication.processEvents()
+
+        splash.update_message("Stopping recognition...")
         self.stop_recognition.set()
+
+        splash.update_message("Stopping alert checker...")
         self.alert_checker.stop()
+
         if self.audio_stream is not None:
+            splash.update_message("Closing wake word thread...")
             self.wake_word_thread.quit()
             self.wake_word_thread.wait()
+
+        splash.update_message("Closing speech thread...")
         self.speech_thread.quit()
         self.speech_thread.wait()
+
+        splash.update_message("Closing alert thread...")
         self.alert_thread.quit()
         self.alert_thread.wait()
+
+        splash.update_message("Closing consciousness thread...")
+        self.consciousness_thread.quit()
+        self.consciousness_thread.wait()
+
+        sleep(1)  # Small delay for visual closure
+        splash.close()
         event.accept()
 
     def display_text(self, text):

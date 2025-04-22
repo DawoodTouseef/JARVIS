@@ -28,7 +28,7 @@ from gui.signup import SignupPage
 from gui.AssistantGUI import AssistantGUI
 from config import JARVIS_DIR, DATABASE_URL, SESSION_PATH,loggers
 from utils.models.users import Users
-
+from gui.splash_screen import SplashScreen
 # Set up logging
 log = loggers["MAIN"]
 
@@ -139,7 +139,6 @@ def run_migrations():
 
 
 # --------------------------- APPLICATION HANDLING --------------------------- #
-
 class ApplicationManager:
     def __init__(self):
         self.app = QApplication(sys.argv)

@@ -237,7 +237,7 @@ def react_node(state: AgentState) -> AgentState:
     react_state = React(prompt=state["input"], image=state.get("image", []))
     if not state.get("image"):
         result = react_agent(react_state)
-        state["final_response"] = result.get("output", "")
+        state["final_response"] = result
     else:
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_react = executor.submit(react_agent, react_state)
@@ -245,7 +245,7 @@ def react_node(state: AgentState) -> AgentState:
             try:
                 output_react = future_react.result()
                 output_vision = future_vision.result()
-                state["final_response"] = f"{output_react.get('output', '')} {output_vision or ''}".strip()
+                state["final_response"] = f"{output_react} {output_vision or ''}".strip()
             except Exception as e:
                 logging.error(f"Agent execution error: {e}")
                 state["final_response"] = "Error processing request."
@@ -407,6 +407,6 @@ def get_agent(user_input: str, image: List[str] = None, audio: str = None) -> st
     return final_state["final_response"]
 
 if __name__ == "__main__":
-    input_query =  "List the list of installed software in my system?"
+    input_query =  "weather in Mangalore"
     response = get_agent(input_query)
     print(f"JARVIS: {response}")

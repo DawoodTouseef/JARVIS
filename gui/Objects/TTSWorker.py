@@ -6,18 +6,6 @@ from torch.cuda import is_available
 
 log = loggers['AUDIO']
 
-try:
-    if is_available():
-        from audio.tts_providers.indic_parler_tts import Indic_Parler_TTS
-        tts_engine = Indic_Parler_TTS()
-        log.info("🔊 Using Indic Parler TTS (CUDA available).")
-    else:
-        import pyttsx4
-        tts_engine = pyttsx4.init()
-        log.info("🔊 Using pyttsx4 (CPU fallback).")
-except Exception as e:
-    log.error(f"TTS initialization error: {e}")
-    tts_engine = None
 
 
 class TTSWorker(QObject):
@@ -32,6 +20,18 @@ class TTSWorker(QObject):
             self.text_queue.put(text)
 
     def run(self):
+        try:
+            if is_available():
+                from audio.tts_providers.indic_parler_tts import Indic_Parler_TTS
+                tts_engine = Indic_Parler_TTS()
+                log.info("🔊 Using Indic Parler TTS (CUDA available).")
+            else:
+                import pyttsx4
+                tts_engine = pyttsx4.init()
+                log.info("🔊 Using pyttsx4 (CPU fallback).")
+        except Exception as e:
+            log.error(f"TTS initialization error: {e}")
+            tts_engine = None
         while not self.text_queue.empty():
             if stop_event.is_set():
                 stop()

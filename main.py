@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os.path
 import dotenv
 import warnings
 # --------------------------- ENVIRONMENT --------------------------- #
@@ -221,38 +222,64 @@ def launch_cli():
         )
 
 # --------------------------- MAIN FUNCTION --------------------------- #
-def main():
-    from sys import argv,exit
+def main(start):
+    from sys import argv, exit
     from time import sleep
+    from PyQt5.QtWidgets import QApplication
+    from gui.splash_screen import SplashScreen
+    import time
     try:
         if len(argv) > 1:
             launch_cli()
         else:
-            from config import loggers
+            print(f"[⏱️]  Initialized in {time.time() - start:.2f}s")
+            from config import loggers,JARVIS_DIR
             log = loggers['MAIN']
             log.info("🤖 Launching J.A.R.V.I.S. Virtual Assistant...")
+
+            app = QApplication(argv)
+            splash = SplashScreen(os.path.join(JARVIS_DIR,"assests","splash-jarvis-logo.jpg"))
+            splash.show()
+            app.processEvents()
+
+            splash.update_message("Gathering System Info")
             print_system_info(log)
 
+            splash.update_message("Checking Internet Connection")
             if not check_internet(log):
                 exit("🚫 Please connect to the internet and restart the assistant.")
 
+            splash.update_message("Initializing Resources")
             initialize_resources(log)
 
+            splash.update_message("Checking Tor Service")
             if not is_tor_running():
                 if not launch_tor(log):
                     log.warning("⚠️ Continuing without Tor routing.")
+                    splash.update_message("⚠️ Continuing without Tor routing.")
                 else:
                     sleep(3)
-
+            else:
+                splash.update_message("Tor is not available")
+                sleep(2)
+            splash.update_message("Verifying IP Settings")
             check_ip_through_proxy(label="Direct", log=log)
             if is_tor_running():
                 check_ip_through_proxy(proxy="socks5h://127.0.0.1:9050", label="Tor", log=log)
 
+            splash.update_message("Launching Interface")
+            from jarvis import ApplicationManager
+            manager = ApplicationManager()
+            splash.finish(manager.current_page)
+            manager.run()
 
-            launch_gui(log)
-    except KeyboardInterrupt as e:
+    except KeyboardInterrupt:
         print("Goodbye!")
+
 
 # --------------------------- ENTRY POINT --------------------------- #
 if __name__ == "__main__":
-    main()
+    import time
+
+    start = time.time()
+    main(start)

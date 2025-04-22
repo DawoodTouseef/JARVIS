@@ -13,22 +13,14 @@
 # limitations under the License.
 # vision_module.py
 
-import torch
 import requests
-import tempfile
 import json
 import os
 from PIL import Image
 from io import BytesIO
 from datetime import datetime
 from pydantic import Field
-from typing import Callable, Optional, List
-from deepface import DeepFace
-from transformers import (
-    DetrImageProcessor, DetrForObjectDetection,
-    BlipProcessor, BlipForConditionalGeneration
-)
-
+from typing import Callable,  List
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import BaseTool, FileWriterTool
 
@@ -87,11 +79,14 @@ def save_temp_image(image: Image.Image) -> str:
 # ---------------------------- Vision Models ----------------------------
 class ObjectDetector:
     def __init__(self):
-        self.processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
-        self.model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
-        self.model.eval()
+        super().__init__()
 
     def detect(self, image: Image.Image):
+        from transformers import DetrImageProcessor,DetrForObjectDetection
+        import torch
+        self.processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50", cache_dir=".cache")
+        self.model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50", cache_dir=".cache")
+        self.model.eval()
         inputs = self.processor(images=image, return_tensors="pt")
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -108,11 +103,17 @@ class ObjectDetector:
 
 class ImageToText:
     def __init__(self):
-        self.processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-        self.model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
-        self.model.eval()
+        super().__init__()
 
     def generate(self, image: Image.Image):
+        from transformers import (
+            BlipProcessor, BlipForConditionalGeneration
+        )
+        import torch
+        self.processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base", cache_dir=".cache")
+        self.model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base",
+                                                                  cache_dir=".cache")
+        self.model.eval()
         inputs = self.processor(images=image, return_tensors="pt")
         with torch.no_grad():
             outputs = self.model.generate(**inputs)
@@ -120,6 +121,7 @@ class ImageToText:
 
 class FaceAnalyzer:
     def analyze(self, image_path: str):
+        from deepface import DeepFace
         try:
             return DeepFace.analyze(img_path=image_path, actions=["age", "gender", "emotion", "race"], enforce_detection=False)
         except Exception as e:
