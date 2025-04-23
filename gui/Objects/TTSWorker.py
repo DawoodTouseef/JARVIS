@@ -22,7 +22,8 @@ class TTSWorker(QObject):
     def run(self):
         try:
             if is_available():
-                from audio.tts_providers.indic_parler_tts import Indic_Parler_TTS
+                from audio.tts_providers.indic_parler_tts import Indic_Parler_TTS,download_parlertts
+                download_parlertts()
                 tts_engine = Indic_Parler_TTS()
                 log.info("🔊 Using Indic Parler TTS (CUDA available).")
             else:
