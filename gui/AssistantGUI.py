@@ -671,29 +671,29 @@ class AssistantGUI(QMainWindow):
         splash.show()
         QApplication.processEvents()
 
-        splash.update_message("Stopping recognition...")
+        splash.update_message("Stopping recognition",16)
         self.stop_recognition.set()
 
-        splash.update_message("Stopping alert checker...")
+        splash.update_message("Stopping alert checker",16*2)
         self.alert_checker.stop()
 
         if self.audio_stream is not None:
-            splash.update_message("Closing wake word thread...")
+            splash.update_message("Closing wake word thread",16*3)
             self.wake_word_thread.quit()
             self.wake_word_thread.wait()
 
-        splash.update_message("Closing speech thread...")
+        splash.update_message("Closing speech thread",16*4)
         self.speech_thread.quit()
         self.speech_thread.wait()
 
-        splash.update_message("Closing alert thread...")
+        splash.update_message("Closing alert thread",16*5)
         self.alert_thread.quit()
         self.alert_thread.wait()
 
-        splash.update_message("Closing consciousness thread...")
+        splash.update_message("Closing consciousness thread",16*6)
         self.consciousness_thread.quit()
         self.consciousness_thread.wait()
-
+        splash.update_message("Shutting down the JARVIS",100)
         sleep(1)  # Small delay for visual closure
         splash.close()
         event.accept()

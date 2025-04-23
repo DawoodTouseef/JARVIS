@@ -40,30 +40,34 @@ def check_internet(log, timeout=5):
         log.error("❌ No internet connection.")
         return False
 
-def download_nltk_resources(log):
+def download_nltk_resources(log,splash):
     import nltk
     try:
         log.info("📥 Downloading NLTK resources...")
+        splash.update_message("📥 Downloading NLTK resources...",60)
         nltk.download('punkt', quiet=True)
         nltk.download('wordnet', quiet=True)
         nltk.download('averaged_perceptron_tagger', quiet=True)
         nltk.download('stopwords', quiet=True)
         log.info("✅ NLTK resources ready.")
+        splash.update_message("✅ NLTK resources ready.",65)
     except Exception as e:
         log.warning(f"[!] NLTK download error: {e}")
 
-def initialize_resources(log):
+def initialize_resources(log,splash):
     from jarvis import run_migrations
     import sys
     try:
         log.info("🛠️ Running database migrations...")
+        splash.update_message("🛠️ Running database migrations",50)
         run_migrations()
         log.info("✅ Migrations completed.")
+        splash.update_message("✅ Migrations completed.",55)
     except Exception as e:
         log.error(f"[!] Migration failed: {e}")
         sys.exit(1)
 
-    download_nltk_resources(log)
+    download_nltk_resources(log,splash)
 
 # --------------------------- TOR FUNCTIONS --------------------------- #
 def is_tor_running():
@@ -228,46 +232,49 @@ def main(start):
     from PyQt5.QtWidgets import QApplication
     from gui.splash_screen import SplashScreen
     import time
+
     try:
         if len(argv) > 1:
             launch_cli()
         else:
             print(f"[⏱️]  Initialized in {time.time() - start:.2f}s")
-            from config import loggers,JARVIS_DIR
+            from config import loggers, JARVIS_DIR
             log = loggers['MAIN']
             log.info("🤖 Launching J.A.R.V.I.S. Virtual Assistant...")
 
             app = QApplication(argv)
-            splash = SplashScreen(os.path.join(JARVIS_DIR,"assests","splash-jarvis-logo.jpg"))
+            splash = SplashScreen(os.path.join(JARVIS_DIR, "assests", "splash-jarvis-logo.jpg"))
             splash.show()
             app.processEvents()
 
-            splash.update_message("Gathering System Info")
+            splash.update_message("Gathering System Info", 10)
             print_system_info(log)
 
-            splash.update_message("Checking Internet Connection")
+            splash.update_message("Checking Internet Connection", 20)
             if not check_internet(log):
                 exit("🚫 Please connect to the internet and restart the assistant.")
 
-            splash.update_message("Initializing Resources")
-            initialize_resources(log)
+            splash.update_message("Initializing Resources", 40)
+            initialize_resources(log,splash)
 
-            splash.update_message("Checking Tor Service")
+            splash.update_message("Checking Tor Service", 70)
             if not is_tor_running():
                 if not launch_tor(log):
                     log.warning("⚠️ Continuing without Tor routing.")
-                    splash.update_message("⚠️ Continuing without Tor routing.")
+                    splash.update_message("⚠️ Continuing without Tor routing", 70)
                 else:
                     sleep(3)
             else:
-                splash.update_message("Tor is not available")
+                splash.update_message("Tor not available", 70)
                 sleep(2)
-            splash.update_message("Verifying IP Settings")
+
+            splash.update_message("Verifying IP Settings", 90)
             check_ip_through_proxy(label="Direct", log=log)
             if is_tor_running():
                 check_ip_through_proxy(proxy="socks5h://127.0.0.1:9050", label="Tor", log=log)
 
-            splash.update_message("Launching Interface")
+            splash.update_message("Launching Interface", 100)
+            sleep(5)
             from jarvis import ApplicationManager
             manager = ApplicationManager()
             splash.finish(manager.current_page)
