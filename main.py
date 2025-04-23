@@ -14,6 +14,8 @@
 import os.path
 import dotenv
 import warnings
+import time
+
 # --------------------------- ENVIRONMENT --------------------------- #
 dotenv.load_dotenv()
 warnings.filterwarnings("ignore")
@@ -123,17 +125,6 @@ def check_ip_through_proxy(log, proxy=None, label="Direct"):
         log.info(f"🌐 {label} IP: {ip}")
     except Exception as e:
         log.warning(f"[!] {label} IP check failed: {e}")
-
-# --------------------------- APPLICATION LAUNCH --------------------------- #
-def launch_gui(log):
-    from jarvis import ApplicationManager
-    from sys import exit
-    try:
-        manager = ApplicationManager()
-        manager.run()
-    except Exception as e:
-        log.error(f"[!] J.A.R.V.I.S. failed to start: {e}")
-        exit(1)
 
 def set_env(key, value):
     dotenv.set_key(".env", key, value)
@@ -286,7 +277,5 @@ def main(start):
 
 # --------------------------- ENTRY POINT --------------------------- #
 if __name__ == "__main__":
-    import time
-
     start = time.time()
     main(start)
