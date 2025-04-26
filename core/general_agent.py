@@ -33,7 +33,6 @@ from playwright.async_api import async_playwright
 from core.tools.router import ToolRouter
 from config import loggers, JARVIS_DIR
 import threading
-from coder.cli.console_terminal import ConsoleTerminal
 
 logger = loggers['AGENTS']
 
@@ -140,7 +139,6 @@ class GeneralPurposeAgent:
         self.browser = None
         self.executor = ThreadPoolExecutor(max_workers=config.max_concurrent_tasks)
         self._event_loop = asyncio.new_event_loop()
-        self.console = ConsoleTerminal()
         try:
             model_data = get_model_from_database()
             self.llm_model = LLM(
@@ -303,7 +301,7 @@ class GeneralPurposeAgent:
         if cache_key in self.search_cache:
             self.logger.info({"message": "Returning cached search results", "query": query})
             return self.search_cache[cache_key]
-        self.console.print(cache_key,style='#646c75')
+
         search_tools = [t for t in self.tools if t.name in ["google", "duckduckgo"]]
         if not search_tools:
             self.logger.error({"error": "No search tools available"})
@@ -318,7 +316,7 @@ class GeneralPurposeAgent:
                 try:
                     result = tool.func(query=current_query, max_number=5)
                     iteration_results.append(f"Results from {tool.name}:\n{result}")
-                    self.console.print(f"Results from {tool.name}:\n{result}",style="#2ca88b")
+
                 except Exception as e:
                     self.logger.error({"error": f"Error in {tool.name}", "details": str(e)})
                     iteration_results.append(f"Error in {tool.name}: {str(e)}")
@@ -342,8 +340,7 @@ class GeneralPurposeAgent:
         final_result = "\n".join(results)
         self.search_cache[cache_key] = final_result
         self.logger.info({"message": "Cached search results", "query": query})
-        self.console.print("""DeepSearch:\n""",style="#2ca88b")
-        self.console.print(final_result,style="#2ca88b")
+
         return final_result
 
     def think_mode(self, task_description: str, context: str = "") -> str:
@@ -390,9 +387,8 @@ class GeneralPurposeAgent:
         crew = Crew(agents=[self.agent], tasks=[eval_task], verbose=False)
         final_result = crew.kickoff()
         thoughts.append(f"Final Evaluation: {final_result}")
-        self.console.print("Think:\n")
-        for thought in thoughts:
-            self.console.print(thought,style='#2ca88b')
+
+
         return "\n".join(thoughts)
 
     def execute_task(self, task_request: TaskRequest, task_id: str,
@@ -408,10 +404,6 @@ class GeneralPurposeAgent:
             result = self.process_image(task_request.description.split(":", 1)[1].strip())
             success = "Error" not in result
             execution_time = (datetime.now() - start_time).total_seconds()
-            if not success:
-                self.console.print(result,style="#ff1500")
-            else:
-                self.console.print(result,style='#2ca88b')
             return {
                 "task_id": task_id,
                 "result": result,
@@ -422,10 +414,6 @@ class GeneralPurposeAgent:
             result = self.process_pdf(task_request.description.split(":", 1)[1].strip())
             success = "Error" not in result
             execution_time = (datetime.now() - start_time).total_seconds()
-            if not success:
-                self.console.print(result,style="#ff1500")
-            else:
-                self.console.print(result,style='#2ca88b')
             return {
                 "task_id": task_id,
                 "result": result,
@@ -505,10 +493,6 @@ class GeneralPurposeAgent:
 
         if progress_callback:
             progress_callback(task_id, 1.0, task_request.description)
-        if not success:
-            self.console.print(result, style="#ff1500")
-        else:
-            self.console.print(result, style='#2ca88b')
         return {
             "task_id": task_id,
             "result": result,
@@ -566,14 +550,10 @@ class GeneralPurposeAgent:
             self.plan_cache[cache_key] = subtasks
             self.logger.info(
                 {"message": "Cached subtask plan", "input": user_input, "subtasks": len(validated_subtasks)})
-            for i in validated_subtasks:
-                self.console.print(str(i),style='#2ca88b')
             return validated_subtasks
         except ValueError as e:
             self.logger.error(
                 {"error": "Failed to parse subtask plan", "details": str(e), "result_type": type(result).__name__})
-            for i in result:
-                self.console.print(str(i), style="#ff1500")
             return [TaskRequest(description=user_input, priority=1, timeout=self.config.default_task_timeout)]
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=5))
@@ -604,11 +584,9 @@ class GeneralPurposeAgent:
             result = crew.kickoff()
             if hasattr(result, 'raw'):
                 return result.raw
-            self.console.print(str(result), style='#2ca88b')
             return str(result)
         except Exception as e:
             self.logger.error({"error": "Failed to summarize responses", "details": str(e)})
-            self.console.print(f"Summary Error: {str(e)}\nRaw Successful Responses:\n{response_summary}\nFailed Responses:\n{failed_responses}", style="#ff1500")
             return f"Summary Error: {str(e)}\nRaw Successful Responses:\n{response_summary}\nFailed Responses:\n{failed_responses}"
 
     def process_user_input(
@@ -689,7 +667,6 @@ class GeneralPurposeAgent:
 
         summary = self.summarize_responses(user_input, subtask_responses)
         self.logger.info({"message": "Completed processing", "task_group_id": task_group_id})
-        self.console.print(str(summary), style='#2ca88b')
         return {
             "user_input": user_input,
             "task_group_id": task_group_id,
@@ -714,8 +691,8 @@ def general_agent(user_input):
         except StopIteration:
             priority = "N/A"
         tools = ", ".join(tool.name for tool in agent.tools) or "none"
-        print(
-            f"Task {task_id} (Priority: {priority}, Tools: {tools}, {description[:50]}...): {progress * 100:.0f}% complete")
+        #print(
+        #    f"Task {task_id} (Priority: {priority}, Tools: {tools}, {description[:50]}...): {progress * 100:.0f}% complete")
 
     agent.init_browser()
     try:
@@ -725,5 +702,5 @@ def general_agent(user_input):
     return result['summary']
 
 if __name__ == "__main__":
-    result=general_agent("Research the latest AI advancements, summarize their impact on cloud storage")
+    result=general_agent("What is the weather in Manchurian?")
     print(result)

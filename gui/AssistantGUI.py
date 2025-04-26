@@ -202,44 +202,64 @@ class AssistantGUI(QMainWindow):
             Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
 
     def setup_threads(self):
+        # 🗣️ Speech Recognition
         self.speech_thread = QThread()
         self.speech_worker = SpeechRecognitionWorker(self.recognizer, self.microphone, self.stop_recognition)
         self.speech_worker.moveToThread(self.speech_thread)
 
+        # 🧠 Agent
         self.agent_thread = QThread()
         self.agent_worker = AgentWorker()
         self.agent_worker.moveToThread(self.agent_thread)
 
+        # 🔊 TTS
         self.tts_thread = QThread()
         self.tts_worker = TTSWorker()
         self.tts_worker.moveToThread(self.tts_thread)
 
+        # 🔔 Alerts
         self.alert_thread = QThread()
         self.alert_checker = AlertCheck(DatabaseTool(), YahooFinanceTool())
         self.alert_checker.moveToThread(self.alert_thread)
 
+        # 👁️‍🗨️ Consciousness
         self.consciousness_thread = QThread()
         self.consciousness_worker = ConsciousnessWorker(self.stop_recognition)
         self.consciousness_worker.moveToThread(self.consciousness_thread)
 
+        # 👂 Wake Word
         if self.audio_stream:
             self.wake_word_thread = QThread()
             self.wake_word_worker = WakeWordWorker(self.porcupine, self.audio_stream, self.stop_recognition)
             self.wake_word_worker.moveToThread(self.wake_word_thread)
 
     def setup_signal_connections(self):
+        # 🗣️ Speech Recognition Signals
+        self.speech_thread.started.connect(self.speech_worker.run)
         self.speech_worker.transcription_signal.connect(self.start_agent_processing)
-        self.speech_worker.listen_signal.connect(self.display_error)
+        self.speech_worker.listen_signal.connect(self.display_text)  # Better name
         self.speech_worker.error_signal.connect(self.display_error)
 
+        # 🧠 Agent Signals
+        self.agent_thread.started.connect(self.agent_worker.run)
         self.agent_worker.response_signal.connect(self.start_tts)
+
+        # 🔊 TTS Signals
+        self.tts_thread.started.connect(self.tts_worker.run)
         self.tts_worker.finished_signal.connect(self.tts_finished)
 
+        # 🔔 Alerts Signals
+        self.alert_thread.started.connect(self.alert_checker.run)
         self.alert_checker.alert_triggered.connect(self.handle_alerts)
+
+        # 👁️‍🗨️ Consciousness Signals
+        self.consciousness_thread.started.connect(self.consciousness_worker.run)
         self.consciousness_worker.update_signal.connect(self.display_proactive_update)
         self.consciousness_worker.image_signal.connect(self.process_image_input)
 
+        # 👂 Wake Word Signals
         if self.audio_stream:
+            self.wake_word_thread.started.connect(self.wake_word_worker.run)
             self.wake_word_worker.wake_word_detected.connect(self.on_wake_word_detected)
             self.wake_word_worker.error_signal.connect(self.display_error)
 
@@ -248,7 +268,6 @@ class AssistantGUI(QMainWindow):
         self.consciousness_thread.start()
         if self.audio_stream:
             self.wake_word_thread.start()
-
 
     def setup_tray_icon(self):
         self.tray = QSystemTrayIcon(QIcon("icon.png"), self)
@@ -523,7 +542,9 @@ class AssistantGUI(QMainWindow):
         if self.speech_thread.isRunning():
             self.speech_thread.quit()
             self.speech_thread.wait()
-        self.stop_interaction_animation()
+        print("TTS is completed!")
+        if not self.tts_thread.isRunning() and not self.agent_thread.isRunning() and not self.speech_thread.isRunning():
+            self.stop_interaction_animation()
 
     def change_color(self):
         dialog = IntegrationsDialog(self)

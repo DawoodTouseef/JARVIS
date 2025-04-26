@@ -1,139 +1,153 @@
-from PyQt5.QtCore import QObject,QThread
-from PyQt5.QtCore import  pyqtSignal
-from config import loggers
-import psutil
-import netifaces
-import json
+from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from config import loggers,PLUGIN_DIR
+import psutil, netifaces, json
 from datetime import datetime
+import os
+import importlib.util
+from jarvis_integration.alert_plugins.base import BaseAlertPlugin
 
-log=loggers['AGENTS']
+log = loggers['AGENTS']
 
 
 class AlertCheck(QObject):
-    alert_triggered = pyqtSignal(list)  # Signal to emit triggered alerts (stock and system)
+    alert_triggered = pyqtSignal(list)  # Signal to emit alerts (both system + stock)
 
     def __init__(self, db_tool, yahoo_tool, parent=None):
         super().__init__(parent)
         self.db_tool = db_tool
         self.yahoo_tool = yahoo_tool
         self.running = False
-        # Thresholds for proactive system alerts (customizable via preferences if desired)
-        self.cpu_threshold = 90.0  # Alert if CPU usage > 90%
-        self.memory_threshold = 90.0  # Alert if memory usage > 90%
-        self.battery_threshold = 20.0  # Alert if battery < 20%
-        self.disk_threshold = 90.0  # Alert if disk usage > 90%
-
+        self.plugins = []
+        # Configurable thresholds
+        self.cpu_threshold = 90.0
+        self.memory_threshold = 90.0
+        self.battery_threshold = 20.0
+        self.disk_threshold = 90.0
+        self.load_plugins()
     def get_system_sensors(self):
-        """Fetch system metrics using psutil."""
         try:
-            cpu_usage = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
             battery = psutil.sensors_battery()
             return {
-                "cpu": cpu_usage,
-                "memory": memory.percent,
-                "disk": disk.percent,
-                "battery": battery.percent if battery else 100.0,  # Assume 100% if no battery
+                "cpu": psutil.cpu_percent(interval=1),
+                "memory": psutil.virtual_memory().percent,
+                "disk": psutil.disk_usage('/').percent,
+                "battery": battery.percent if battery else 100,
                 "power_plugged": battery.power_plugged if battery else True
             }
         except Exception as e:
-            return {"error": f"System monitoring failed: {str(e)}"}
+            log.error(f"Sensor error: {e}")
+            return {}
 
     def get_network_status(self):
-        """Check network connectivity using netifaces."""
         try:
             gateways = netifaces.gateways()
             return "connected" if 'default' in gateways and gateways['default'] else "disconnected"
         except Exception:
             return "unknown"
 
+    # ---------------- Stock Alert Logic ---------------- #
+    def check_stock_alerts(self, triggered):
+        from core.personal_assistant import EXCHANGE_RATES
+        currency = self.db_tool._run("get_preference", key="currency", default="USD")
+        currency = currency if currency in EXCHANGE_RATES else "USD"
+        rate_to_usd = EXCHANGE_RATES[currency]
+
+        alerts = json.loads(self.db_tool._run("get_alerts"))
+        purchases = json.loads(self.db_tool._run("get_purchases_for_alerts"))
+
+        for ticker, target_price, alert_currency in alerts:
+            data = json.loads(self.yahoo_tool._run(ticker))
+            if "price" in data:
+                usd_price = data["price"]
+                alert_price_usd = target_price / EXCHANGE_RATES.get(alert_currency, 1)
+                if usd_price >= alert_price_usd:
+                    converted = usd_price * EXCHANGE_RATES[currency]
+                    triggered.append(
+                        f"📈 {data['company']} ({ticker}) hit {currency}{converted:.2f} (target: {alert_currency}{target_price})"
+                    )
+                    self.db_tool._run("log_notification", message=f"Stock alert for {ticker} at {currency}{converted:.2f}")
+
+        for ticker, buy_price, qty, buy_currency in purchases:
+            data = json.loads(self.yahoo_tool._run(ticker))
+            if "price" in data:
+                usd_price = data["price"]
+                buy_price_usd = buy_price / EXCHANGE_RATES.get(buy_currency, 1)
+                target_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_target_profit", default=0))
+                min_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_min_profit", default=0))
+
+                profit = (usd_price - buy_price_usd) * qty
+                if usd_price >= buy_price_usd + target_profit and profit >= min_profit:
+                    converted_profit = profit * EXCHANGE_RATES[currency]
+                    triggered.append(
+                        f"💰 {data['company']} ({ticker}) profit: {currency}{converted_profit:.2f} (qty: {qty})"
+                    )
+                    self.db_tool._run("log_notification", message=f"Profit alert for {ticker}: {currency}{converted_profit:.2f}")
+
+    # ---------------- System Alert Logic ---------------- #
+    def check_system_alerts(self, triggered):
+        sensors = self.get_system_sensors()
+        network_status = self.get_network_status()
+
+        if sensors.get("cpu", 0) > self.cpu_threshold:
+            triggered.append(f"🔥 CPU usage {sensors['cpu']:.1f}% exceeds {self.cpu_threshold}%")
+        if sensors.get("memory", 0) > self.memory_threshold:
+            triggered.append(f"🧠 Memory usage {sensors['memory']:.1f}% exceeds {self.memory_threshold}%")
+        if sensors.get("disk", 0) > self.disk_threshold:
+            triggered.append(f"💾 Disk usage {sensors['disk']:.1f}% exceeds {self.disk_threshold}%")
+        if sensors.get("battery", 100) < self.battery_threshold and not sensors.get("power_plugged", True):
+            triggered.append(f"🔋 Battery low: {sensors['battery']}%")
+
+        if network_status == "disconnected":
+            triggered.append("🚫 Network disconnected.")
+
+        for alert in triggered:
+            self.db_tool._run("log_notification", message=f"{alert} @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    def load_plugins(self):
+        for file in os.listdir(PLUGIN_DIR):
+            if file.endswith(".py") and not file.startswith("__"):
+                plugin_path = os.path.join(PLUGIN_DIR, file)
+                plugin_name = os.path.splitext(file)[0]
+
+                spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
+                module = importlib.util.module_from_spec(spec)
+
+                try:
+                    spec.loader.exec_module(module)
+                except Exception as e:
+                    print(f"[Plugin Error] Failed to load {file}: {e}")
+                    continue
+
+                # Scan for classes that inherit from jarvis_integration.BaseAlertPlugin
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if isinstance(attr, type) and issubclass(attr, BaseAlertPlugin) and attr != BaseAlertPlugin:
+                        try:
+                            instance = attr(self.db_tool, self.yahoo_tool)
+                            self.plugins.append(instance)
+                            print(f"[Plugin] Loaded: {attr.__name__} from {file}")
+                        except Exception as e:
+                            print(f"[Plugin Init Error] {attr.__name__} failed: {e}")
+
+    # ---------------- MAIN CHECK LOOP ---------------- #
     def run(self):
-        from core.personal_assistant import EXCHANGE_RATES  # Assuming EXCHANGE_RATES is defined here
         self.running = True
         while self.running:
-            triggered = []  # Collect all alerts (stock + system)
+            triggered = []
+            try:
+                self.check_stock_alerts(triggered)
+                self.check_system_alerts(triggered)
+                for plugin in self.plugins:
+                    alerts = plugin.check_alerts()
+                    if alerts:
+                        triggered.extend(alerts)
 
-            # 1. Stock Alerts (existing functionality)
-            user_currency_result = self.db_tool._run("get_preference", key="currency", default="USD")
-            user_currency = user_currency_result if user_currency_result in EXCHANGE_RATES else "USD"
-            rate_to_usd = EXCHANGE_RATES[user_currency]
-            alerts = json.loads(self.db_tool._run("get_alerts"))
-            purchases = json.loads(self.db_tool._run("get_purchases_for_alerts"))
+                if triggered:
+                    self.alert_triggered.emit(triggered)
+            except Exception as e:
+                log.error(f"[AlertCheck Error] {e}")
 
-            # Stock price target alerts
-            for ticker, target_price, alert_currency in alerts:
-                data = json.loads(self.yahoo_tool._run(ticker))
-                if "price" in data:
-                    usd_price = data["price"]
-                    alert_price_in_usd = target_price / EXCHANGE_RATES.get(alert_currency, 1.0)
-                    if usd_price >= alert_price_in_usd:
-                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
-                        triggered.append(
-                            f"Alert: {data['company']} ({ticker}) is at {user_currency}{converted_price:.2f}, hit your target of {alert_currency}{target_price}"
-                        )
-                        self.db_tool._run("log_notification",
-                                        message=f"Alert triggered for {ticker} at {user_currency}{converted_price:.2f}")
-
-            # Stock profit reminders
-            for ticker, purchase_price, quantity, purchase_currency in purchases:
-                data = json.loads(self.yahoo_tool._run(ticker))
-                if "price" in data:
-                    usd_price = data["price"]
-                    purchase_price_usd = purchase_price / EXCHANGE_RATES.get(purchase_currency, 1.0)
-                    target_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_target_profit", default=0))
-                    min_profit = float(self.db_tool._run("get_preference", key=f"{ticker}_min_profit", default=0))
-                    profit_usd = (usd_price - purchase_price_usd) * quantity
-                    target_price_usd = purchase_price_usd + target_profit
-                    if usd_price >= target_price_usd and profit_usd >= min_profit:
-                        converted_price = usd_price * EXCHANGE_RATES[user_currency]
-                        converted_profit = profit_usd * EXCHANGE_RATES[user_currency]
-                        triggered.append(
-                            f"Reminder: {data['company']} ({ticker}) bought at {purchase_currency}{purchase_price} is now {user_currency}{converted_price:.2f}. Selling yields profit of {user_currency}{converted_profit:.2f} (≥ {user_currency}{min_profit})."
-                        )
-                        self.db_tool._run("log_notification",
-                                        message=f"Profit reminder for {ticker}: {user_currency}{converted_profit:.2f}")
-
-            # 2. System Monitoring and Proactive Updates
-            sensors = self.get_system_sensors()
-            network_status = self.get_network_status()
-
-            # CPU usage alert
-            if "cpu" in sensors and sensors["cpu"] > self.cpu_threshold:
-                triggered.append(f"Warning: CPU usage at {sensors['cpu']:.1f}%, exceeding {self.cpu_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High CPU usage detected: {sensors['cpu']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Memory usage alert
-            if "memory" in sensors and sensors["memory"] > self.memory_threshold:
-                triggered.append(f"Warning: Memory usage at {sensors['memory']:.1f}%, exceeding {self.memory_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High memory usage detected: {sensors['memory']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Disk usage alert
-            if "disk" in sensors and sensors["disk"] > self.disk_threshold:
-                triggered.append(f"Warning: Disk usage at {sensors['disk']:.1f}%, exceeding {self.disk_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"High disk usage detected: {sensors['disk']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Battery level alert (if not plugged in)
-            if "battery" in sensors and sensors["battery"] < self.battery_threshold and not sensors["power_plugged"]:
-                triggered.append(f"Warning: Battery level at {sensors['battery']:.1f}%, below {self.battery_threshold}% threshold.")
-                self.db_tool._run("log_notification",
-                                message=f"Low battery detected: {sensors['battery']:.1f}% at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Network disconnection alert
-            if network_status == "disconnected":
-                triggered.append("Warning: Network connection lost.")
-                self.db_tool._run("log_notification",
-                                message=f"Network disconnection detected at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Emit all triggered alerts (stock + system)
-            if triggered:
-                self.alert_triggered.emit(triggered)
-
-            # Sleep for 10 seconds (consistent with stock checks)
-            QThread.msleep(10000)
+            QThread.msleep(10000)  # 10s interval
 
     def stop(self):
         self.running = False

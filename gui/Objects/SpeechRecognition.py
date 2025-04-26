@@ -3,6 +3,7 @@ from PyQt5.QtCore import QObject
 from PyQt5.QtCore import  pyqtSignal
 from config import loggers
 import numpy as np
+from langchain.tools.human.tool import HumanInputRun
 
 log=loggers['AUDIO']
 
@@ -31,13 +32,14 @@ class SpeechRecognitionWorker(QObject):
             with self.microphone as source:
                 self.recognizer.adjust_for_ambient_noise(source, duration=2)
                 self.listen_signal.emit("🎙️ Listening...")
-
+                print("Listening...")
                 audio = self.recognizer.listen(source)
 
                 if audio is not None:
                     self.listen_signal.emit("🧠 Recognizing speech...")
                     transcription = self.recognizer.recognize_whisper(audio, model="medium")
                     self.log.info(f"Transcription: {transcription}")
+                    print(f"Transcription: {transcription}")
                     self.transcription_signal.emit(transcription)
                 else:
                     self.error_signal.emit("⚠️ No speech detected or audio capture failed.")

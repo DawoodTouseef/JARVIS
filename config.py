@@ -34,6 +34,9 @@ class Model(BaseModel):
 ####################################
 JARVIS_DIR = Path(__file__).parent  # the path containing this file
 SESSION_PATH=os.path.join(Path.home(),".cache","jarvis")
+PLUGIN_DIR=os.path.join(SESSION_PATH,"components","alert_plugin")
+if not os.path.exists(PLUGIN_DIR):
+    os.makedirs(PLUGIN_DIR,exist_ok=True)
 TOOLS=[]
 ALLOW_DANGEROUS_REQUEST = True
 if not os.path.exists(SESSION_PATH):

@@ -4,7 +4,7 @@ from config import loggers
 log = loggers['AGENTS']
 
 class AgentWorker(QObject):
-    response_signal = pyqtSignal(str)
+    response_signal = pyqtSignal(str) #Signal to emit and play the audio
 
     def __init__(self):
         super().__init__()
@@ -52,6 +52,7 @@ class AgentWorker(QObject):
                 response = get_agent(user_input=self.text)
 
             log.info(f"🤖 Agent Response: {response}")
+            print(f"🤖 Agent Response: {response}")
             self.response_signal.emit(response)
 
         except Exception as e:

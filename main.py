@@ -274,7 +274,6 @@ def main(start):
     except KeyboardInterrupt:
         print("Goodbye!")
 
-
 # --------------------------- ENTRY POINT --------------------------- #
 if __name__ == "__main__":
     start = time.time()
