@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 from twilio.rest import Client
 import datetime
-from utils.models.contact import Contact,PhoneNumber,TwilioSettings,CallHistory
-from utils.internals.db import get_db
+from jarvis_integration.models.contact import Contact,PhoneNumber,TwilioSettings,CallHistory
+from jarvis_integration.internals.db import get_db
 
 
 class CallDialerDialog(QDialog):

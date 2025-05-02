@@ -1,11 +1,11 @@
-from config import SESSION_PATH,loggers
-import json
+from config import loggers,SessionManager,SESSION_PATH
 import os
 from mem0 import Memory,MemoryClient
 from datetime import datetime
 from core.Agent_models import get_model_from_database
 from typing import Union,List,Any,Dict
-from utils.models.users import Users
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
 
 log=loggers['MEMORY']
 
@@ -19,77 +19,68 @@ class MemorySettings:
     def _initialize_memory(self) -> None:
         """Initialize memory based on user settings with enhanced context."""
         try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if not os.path.exists(session_file):
-                log.warning("Session file not found. Creating a default session.")
-                os.makedirs(SESSION_PATH, exist_ok=True)
-                with open(session_file, "w") as f:
-                    json.dump({"email": "default@example.com"}, f)
-
-            with open(session_file, "r") as f:
-                data = json.load(f)
-
-            if "email" not in data:
-                raise ValueError("No email found in session data.")
+            session_file = SessionManager()
+            session_file.load_session()
+            data = session_file.get_email()
 
             # Fetch user settings
-            self.users = Users.get_user_by_email(data["email"])
-            if not self.users or not self.users.settings:
-                log.warning("User or settings not found. Using default profile.")
-                self.users = Users(email=data["email"], name="Unknown", settings=json.dumps({}))
+            self.users = Users.get_user_by_email(data)
+            if self.users:
+                mem0_prefs = Preferences.get_preferences_by_user_id(self.users.id)
+                mem0_config = next((pref.setting_value for pref in mem0_prefs if pref.setting_key == "memory"),
+                                       {})
+                model=next((pref for pref in mem0_prefs if pref.setting_key == "llm_model"), None)
+                if mem0_config.get("api_key") is not None or model is not None:
+                    api_key = mem0_config.get("api_key", "")
+                    memory_type = mem0_config.get("memo_engine", "local").lower()
 
-            settings = json.loads(self.users.settings.json())
-            memory_settings = settings.get("memory", {})
-            api_key = memory_settings.get("api_key", "")
-            memory_type = memory_settings.get("memo_engine", "local").lower()
-
-            # Store user metadata for richer context
-            self.user_metadata = {
-                "user_id": f"{self.users.id}-{self.users.name}" if self.users.id else "unknown",
-                "name": self.users.name,
-                "email": self.users.email,
-                "last_active": datetime.now().isoformat(),
-                "preferences": settings.get("preferences", {})
-            }
-
-            # Initialize memory based on engine type
-            if "online" in memory_type:
-                if not api_key:
-                    raise ValueError("API key required for online memory.")
-                self.memory = MemoryClient(api_key=api_key)
-                log.info("Initialized online memory client.")
-            else:
-                model = get_model_from_database()
-                if model is None:
-                    log.warning("No model found in database. Memory disabled.")
-                    return
-
-                config = {
-                    "llm": {
-                        "provider": "openai",
-                        "config": {
-                            "model": model.name,
-                            "openai_base_url": model.url,
-                            "api_key": model.api_key
-                        }
-                    },
-                    "embedder": {
-                        "provider": "huggingface",
-                        "config": {
-                            "model": "multi-qa-MiniLM-L6-cos-v1"
-                        }
-                    },
-                    "vector_store": {
-                        "provider": "chroma",
-                        "config": {
-                            "collection_name": "memory",
-                            "path": f"{os.path.join(SESSION_PATH, 'memory')}",
-                        }
+                    # Store user metadata for richer context
+                    self.user_metadata = {
+                        "user_id": f"{self.users.id}-{self.users.name}" if self.users.id else "unknown",
+                        "name": self.users.name,
+                        "email": self.users.email,
+                        "last_active": datetime.now().isoformat(),
+                        "preferences": mem0_config.get("preferences", {})
                     }
 
-                }
-                self.memory = Memory.from_config(config)
-                log.info("Initialized local memory with Chroma vector store.")
+                    # Initialize memory based on engine type
+                    if "online" in memory_type:
+                        if not api_key:
+                            raise ValueError("API key required for online memory.")
+                        self.memory = MemoryClient(api_key=api_key)
+                        log.info("Initialized online memory client.")
+                    else:
+                        model = get_model_from_database()
+                        if model is None:
+                            log.warning("No model found in database. Memory disabled.")
+                            return
+
+                        config = {
+                            "llm": {
+                                "provider": "openai",
+                                "config": {
+                                    "model": model.name,
+                                    "openai_base_url": model.url,
+                                    "api_key": model.api_key
+                                }
+                            },
+                            "embedder": {
+                                "provider": "huggingface",
+                                "config": {
+                                    "model": "multi-qa-MiniLM-L6-cos-v1"
+                                }
+                            },
+                            "vector_store": {
+                                "provider": "chroma",
+                                "config": {
+                                    "collection_name": "memory",
+                                    "path": f"{os.path.join(SESSION_PATH, 'memory')}",
+                                }
+                            }
+
+                        }
+                        self.memory = Memory.from_config(config)
+                        log.info("Initialized local memory with Chroma vector store.")
 
         except Exception as e:
             log.error(f"Error initializing memory: {e}")
@@ -172,7 +163,6 @@ class MemorySettings:
         self.add_memory(f"Updated user metadata: {key} = {value}", metadata=self.user_metadata)
 
 if __name__=="__main__":
-    import asyncio
     m=MemorySettings()
     m._initialize_memory()
-    print(m.get_proactive_context("What is the recent question i ask about?"))
+    print(m.memory)

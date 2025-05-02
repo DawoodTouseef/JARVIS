@@ -19,6 +19,7 @@ class ConsciousnessWorker(QObject):
         super().__init__()
         self.stop_event = stop_event
         self.memory = MemorySettings()
+        self.memory._initialize_memory()
         self.llm = get_model()
         self.last_screenshot_time = 0
         self.camera = cv2.VideoCapture(0)

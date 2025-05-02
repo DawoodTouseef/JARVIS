@@ -12,3 +12,5 @@ from .components.paper import JarvisPaper
 from .layout.box import JarvisBoxLayout
 from .layout.grid import JarvisGridLayout
 from .themes.theme_manager import ThemeManager
+from jarvis_integration import internals
+from jarvis_integration.models import *

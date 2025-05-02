@@ -44,11 +44,11 @@ class AgentWorker(QObject):
                 self.response_signal.emit(msg)
                 return
 
-            try:
+
                 # If image is provided, pass both text and image
+            if self.text and self.image and get_vision_model_from_database() is not None:
                 response = get_agent(user_input=self.text, image=self.image)
-            except Exception as e:
-                log.warning(f"[!] Vision integration failed, falling back to text-only. Error: {str(e)}")
+            else:
                 response = get_agent(user_input=self.text)
 
             log.info(f"🤖 Agent Response: {response}")

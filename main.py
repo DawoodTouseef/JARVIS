@@ -265,7 +265,7 @@ def main(start):
                 check_ip_through_proxy(proxy="socks5h://127.0.0.1:9050", label="Tor", log=log)
 
             splash.update_message("Launching Interface", 100)
-            sleep(5)
+            sleep(2)
             from jarvis import ApplicationManager
             manager = ApplicationManager()
             splash.finish(manager.current_page)

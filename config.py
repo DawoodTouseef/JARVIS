@@ -14,11 +14,13 @@
 import os
 import logging
 import sys
-
 from pathlib import Path
 import shutil
 from pydantic import BaseModel
 import threading
+import json
+import keyring
+from datetime import datetime, timedelta
 
 stop_event = threading.Event()
 
@@ -34,6 +36,7 @@ class Model(BaseModel):
 ####################################
 JARVIS_DIR = Path(__file__).parent  # the path containing this file
 SESSION_PATH=os.path.join(Path.home(),".cache","jarvis")
+SESSION_FILE=os.path.join(SESSION_PATH,"session.json")
 PLUGIN_DIR=os.path.join(SESSION_PATH,"components","alert_plugin")
 if not os.path.exists(PLUGIN_DIR):
     os.makedirs(PLUGIN_DIR,exist_ok=True)
@@ -85,7 +88,7 @@ log.setLevel(getattr(logging, GLOBAL_LOG_LEVEL))
 log.propagate = False
 log.info(f"GLOBAL_LOG_LEVEL: {GLOBAL_LOG_LEVEL}")
 
-log_sources = ["DB", "MAIN", "AGENTS", "GUI", "AUDIO", "VISION","MEMORY"]
+log_sources = ["DB", "MAIN", "AGENTS", "GUI", "AUDIO", "VISION","MEMORY","SIGNUP","LOGIN"]
 SRC_LOG_LEVELS = {}
 loggers = {}
 
@@ -138,9 +141,9 @@ if DATA_DIR.exists() and DATA_DIR != NEW_DATA_DIR:
 ####################################
 
 # Check if the file exists
-if os.path.exists(f"{DATA_DIR}/ollama.db"):
+if os.path.exists(f"{DATA_DIR}/application.db"):
     # Rename the file
-    os.rename(f"{DATA_DIR}/ollama.db", f"{DATA_DIR}/jarvis.db")
+    os.rename(f"{DATA_DIR}/application.db", f"{DATA_DIR}/jarvis.db")
     log.info("Database migrated from Ollama-WebUI successfully.")
 else:
     pass
@@ -155,3 +158,61 @@ SCREENSHOT_PATH=DATA_DIR / "screenshot" / "screenshot_with_text.png"
 MIC_RECORD_LOCATION = DATA_DIR / "cache"/ "audio" / "mic_record.wav"
 SYSTEM_SOUND_LOCATION = DATA_DIR / "system_sound.wav"
 JUST_SCREENSHOT_PATH = DATA_DIR / "screenshot" /"screenshot.png"
+
+class SessionManager:
+    def __init__(self):
+        self.session_data = {}
+        self.session_timeout = timedelta(minutes=480)  # Session expiry time
+
+    def create_session(self, email):
+        """Create a new session and store it."""
+        self.session_data = {
+            "email": email,
+            "token": f"token_{email}_{int(datetime.now().timestamp())}",
+            "created_at": datetime.now().isoformat(),
+            "expires_at": (datetime.now() + self.session_timeout).isoformat()
+        }
+        # Save session to file
+        with open(SESSION_FILE, 'w') as f:
+            json.dump(self.session_data, f)
+        # Optionally store token in keyring for security
+        keyring.set_password("MyApp", email, self.session_data["token"])
+
+    def load_session(self):
+        """Load session from file and validate."""
+        if not os.path.exists(SESSION_FILE):
+            return False
+        try:
+            with open(SESSION_FILE, 'r') as f:
+                self.session_data = json.load(f)
+            # Check if session is still valid
+            expiry = datetime.fromisoformat(self.session_data["expires_at"])
+            if datetime.now() > expiry:
+                self.clear_session()
+                return False
+            # Verify token in keyring
+            stored_token = keyring.get_password("MyApp", self.session_data["email"])
+            if stored_token != self.session_data["token"]:
+                self.clear_session()
+                return False
+            return True
+        except (json.JSONDecodeError, KeyError):
+            self.clear_session()
+            return False
+
+    def clear_session(self):
+        """Clear session data."""
+        self.session_data = {}
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+        # Clear token from keyring
+        if self.session_data.get("email"):
+            keyring.delete_password("MyApp", self.session_data["email"])
+
+    def is_authenticated(self):
+        """Check if a valid session exists."""
+        return bool(self.session_data and self.load_session())
+
+    def get_email(self):
+        """Get the current user's username."""
+        return self.session_data.get("email", "")

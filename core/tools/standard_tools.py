@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A team of workers"""
-from utils.models.users import Users
+from jarvis_integration.models.users import Users
 from config import SESSION_PATH
 import json
 from langchain.tools.base import tool

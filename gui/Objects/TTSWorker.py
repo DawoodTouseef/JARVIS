@@ -14,25 +14,26 @@ class TTSWorker(QObject):
     def __init__(self):
         super().__init__()
         self.text_queue = Queue()
-
+        try:
+            if is_available():
+                from jarvis_integration.audio.tts_providers.indic_parler_tts import Indic_Parler_TTS,download_parlertts
+                download_parlertts()
+                self.tts_engine = Indic_Parler_TTS()
+                log.info("🔊 Using Indic Parler TTS (CUDA available).")
+                print("🔊 Using Indic Parler TTS (CUDA available).")
+            else:
+                import pyttsx4
+                self.tts_engine = pyttsx4.init()
+                log.info("🔊 Using pyttsx4 (CPU fallback).")
+        except Exception as e:
+            log.error(f"TTS initialization error: {e}")
+            self.tts_engine = None
     def set_text(self, text: str):
         if text:
             self.text_queue.put(text)
 
     def run(self):
-        try:
-            if is_available():
-                from audio.tts_providers.indic_parler_tts import Indic_Parler_TTS,download_parlertts
-                download_parlertts()
-                tts_engine = Indic_Parler_TTS()
-                log.info("🔊 Using Indic Parler TTS (CUDA available).")
-            else:
-                import pyttsx4
-                tts_engine = pyttsx4.init()
-                log.info("🔊 Using pyttsx4 (CPU fallback).")
-        except Exception as e:
-            log.error(f"TTS initialization error: {e}")
-            tts_engine = None
+        from jarvis_integration.audio.tts_providers.indic_parler_tts import Indic_Parler_TTS
         while not self.text_queue.empty():
             if stop_event.is_set():
                 stop()
@@ -43,15 +44,17 @@ class TTSWorker(QObject):
             try:
                 current_text = self.text_queue.get()
                 log.info(f"🗣️ Speaking: {current_text}")
-
-                if isinstance(tts_engine, Indic_Parler_TTS):
-                    audio, sample_rate = tts_engine.run(current_text)
+                print(f"🗣️ Speaking: {current_text}")
+                if isinstance(self.tts_engine, Indic_Parler_TTS):
+                    print("Using transformers...")
+                    audio, sample_rate = self.tts_engine.run(current_text)
                     play(audio, sample_rate)
                     wait(ignore_errors=True)
                     stop()
                 else:
-                    tts_engine.say(current_text)
-                    tts_engine.runAndWait()
+                    print("using Pyttsx4")
+                    self.tts_engine.say(current_text)
+                    self.tts_engine.runAndWait()
 
             except Exception as e:
                 log.error(f"❌ TTS Error: {e}")

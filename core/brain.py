@@ -31,7 +31,7 @@ import json
 from typing import  List
 from datetime import datetime
 from config import SESSION_PATH
-from utils.models.users import Users
+from jarvis_integration.models.users import Users
 from core.Agent_models import get_model_from_database
 
 import requests
@@ -136,30 +136,30 @@ def generate_response(input_str: str, context: str) -> str:
 
     return response
 
+if get_model_from_database() is not None:
+    jarvis_llm = LLM(
+        model=get_model_from_database().name,
+        base_url=get_model_from_database().url,
+        api_key=get_model_from_database().api_key
+    )
 
-jarvis_llm = LLM(
-    model=get_model_from_database().name,
-    base_url=get_model_from_database().url,
-    api_key=get_model_from_database().api_key
-)
+    jarvis_responder = Agent(
+        role="JARVIS Responder",
+        goal="Provide witty, helpful responses in the style of JARVIS with awareness of context and system state",
+        backstory="I am JARVIS, Tony Stark’s loyal AI, here to assist with charm, precision, and a simulated consciousness.",
+        llm=jarvis_llm,
+        tools= ToolRouter().get_crewai_tools(),
+        verbose=True,
+    )
 
-jarvis_responder = Agent(
-    role="JARVIS Responder",
-    goal="Provide witty, helpful responses in the style of JARVIS with awareness of context and system state",
-    backstory="I am JARVIS, Tony Stark’s loyal AI, here to assist with charm, precision, and a simulated consciousness.",
-    llm=jarvis_llm,
-    tools= ToolRouter().get_crewai_tools(),
-    verbose=True,
-)
-
-researcher = Agent(
-    role="Research Specialist",
-    goal="Gather information from the web or tools",
-    backstory="A diligent aide to JARVIS, tasked with fetching data.",
-    llm=jarvis_llm,
-    verbose=True,
-    tools=ToolRouter().get_crewai_tools()
-)
+    researcher = Agent(
+        role="Research Specialist",
+        goal="Gather information from the web or tools",
+        backstory="A diligent aide to JARVIS, tasked with fetching data.",
+        llm=jarvis_llm,
+        verbose=True,
+        tools=ToolRouter().get_crewai_tools()
+    )
 
 def create_response_task(user_input: str) -> Task:
     return Task(

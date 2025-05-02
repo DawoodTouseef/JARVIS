@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QColor,QIcon
 from PyQt5.QtCore import Qt
-from utils.models.users import Users
+from jarvis_integration.models.users import Users
 
 import uuid
 import os

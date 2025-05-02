@@ -12,54 +12,84 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from utils.models.users import Users
-from config import SESSION_PATH
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
+from config import SESSION_PATH, Model, SessionManager
 import json
 import os
-from config import Model
 from typing import Optional
 from langchain_openai import ChatOpenAI
 
-def get_model_from_database()->Optional[Model]:
+def get_model_from_database() -> Optional[Model]:
     """
+    Retrieve the LLM model configuration from the preference table for the current user.
 
-    :return:
+    Returns:
+        Optional[Model]: The Model object if found, otherwise None.
     """
-    session_json=os.path.join(SESSION_PATH,"session.json")
-    if os.path.exists(os.path.join(SESSION_PATH,"session.json")):
-        with open(session_json,"r") as f:
-            data=json.load(f)
-        if "email" in data:
-            users=Users.get_user_by_email(data.get("email"))
-            if users:
-                if users.settings is not None:
-                    settings = json.loads(users.settings.json())
-                    if "model" in settings:
-                        model_dict=settings['model']
-                        model=Model.model_validate(model_dict)
-                        return model
-    else:
+    try:
+        # Load session and get user email
+        session = SessionManager()
+        session.load_session()
+        email = session.get_email()
+        if not email:
+            return None
+
+        # Fetch user by email
+        user = Users.get_user_by_email(email)
+        if not user:
+            return None
+
+        # Fetch LLM model preference
+        llm_prefs = Preferences.get_preferences_by_user_id(user.id)
+        existing_pref = next((pref for pref in llm_prefs if pref.setting_key == "llm_model"), None)
+        if not existing_pref or not existing_pref.setting_value:
+            return None
+
+        # Validate and return the model
+        model = Model.model_validate(existing_pref.setting_value)
+        return model
+
+    except Exception as e:
+        # Log error if needed, but return None to handle gracefully
+        print(f"Error retrieving model from database: {e}")
         return None
+
 def get_vision_model_from_database()->Optional[Model]:
-    """
+        """
+        Retrieve the LLM model configuration from the preference table for the current user.
 
-    :return:
-    """
-    session_json=os.path.join(SESSION_PATH,"session.json")
-    if os.path.exists(os.path.join(SESSION_PATH,"session.json")):
-        with open(session_json,"r") as f:
-            data=json.load(f)
-        if "email" in data:
-            users=Users.get_user_by_email(data.get("email"))
-            if users:
-                if users.settings is not None:
-                    settings = json.loads(users.settings.json())
-                    if "vision" in settings:
-                        model_dict=settings['vision']
-                        model=Model.model_validate(model_dict)
-                        return model
-    else:
-        return None
+        Returns:
+            Optional[Model]: The Model object if found, otherwise None.
+        """
+        try:
+            # Load session and get user email
+            session = SessionManager()
+            session.load_session()
+            email = session.get_email()
+            if not email:
+                return None
+
+            # Fetch user by email
+            user = Users.get_user_by_email(email)
+            if not user:
+                return None
+
+            # Fetch LLM model preference
+            llm_prefs = Preferences.get_preferences_by_user_id(user.id)
+            existing_pref = next((pref for pref in llm_prefs if pref.setting_key == "vision_model"), None)
+            if not existing_pref or not existing_pref.setting_value:
+                return None
+
+            # Validate and return the model
+            model = Model.model_validate(existing_pref.setting_value)
+            return model
+
+        except Exception as e:
+            # Log error if needed, but return None to handle gracefully
+            print(f"Error retrieving model from database: {e}")
+            return None
+
 
 def get_model():
     """

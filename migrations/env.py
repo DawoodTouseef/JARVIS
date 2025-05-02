@@ -5,8 +5,7 @@ from sqlalchemy import pool
 
 from alembic import context
 from config import DATABASE_URL
-from utils.models.contact import PhoneNumber,Contact,TwilioSettings,CallHistory
-from utils.models.users import Users
+from jarvis_integration.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

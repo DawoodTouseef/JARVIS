@@ -47,11 +47,12 @@ EXCHANGE_RATES = {
 }
 
 def get_model():
-    return LLM(
-        model=f"openai/{get_model_from_database().name}",
-        api_key=get_model_from_database().api_key,
-        base_url=get_model_from_database().url,
-    )
+    if get_model_from_database() is not None:
+        return LLM(
+            model=f"openai/{get_model_from_database().name}",
+            api_key=get_model_from_database().api_key,
+            base_url=get_model_from_database().url,
+        )
 
 # Database setup with stock-specific tables
 conn = sqlite3.connect(os.path.join(JARVIS_DIR, "data", "assistant_data.db"), check_same_thread=False)
@@ -360,8 +361,8 @@ class AlertChecker:
 
     def get_alerts(self):
         return self.alerts
-
-config = dict(
+if  get_model_from_database() is not None:
+    config = dict(
     llm=dict(
         provider="openai",
         config=dict(
@@ -378,264 +379,264 @@ config = dict(
     ),
 )
 
-available_tools = {
-    "SecureContactManager": SecureContactManagerTool(),
-    "EncryptDataTool": EncryptDataTool(),
-    "APICallTool": APICallTool(),
-    "TaskTrackerTool": TaskTrackerTool(),
-    "MemoryManagerTool": MemoryManagerTool(),
-    "WebsiteSearchTool": WebsiteSearchTool(config=config),
-    "FileReadTool": FileReadTool(),
-    "ScrapeWebsiteTool": ScrapeWebsiteTool(),
-    "DirectoryReadTool": DirectoryReadTool(),
-    "SerperDevTool": SerperDevTool() if os.environ.get("SERPER_API_KEY") else None,
-    "TXTSearchTool": TXTSearchTool(config=config),
-    "EXASearchTool": EXASearchTool(),
-    "CodeDocsSearchTool": CodeDocsSearchTool(config=config),
-    "CodeInterpreterTool": CodeInterpreterTool(),
-    "CSVSearchTool": CSVSearchTool(config=config),
-    "DOCXSearchTool": DOCXSearchTool(config=config),
-    "DirectorySearchTool": DirectorySearchTool(config=config),
-    "JSONSearchTool": JSONSearchTool(config=config),
-    "MDXSearchTool": MDXSearchTool(config=config),
-    "PDFSearchTool": PDFSearchTool(config=config),
-    "RagTool": RagTool(config=config),
-    "ScrapeElementFromWebsiteTool": ScrapeElementFromWebsiteTool(),
-    "SeleniumScrapingTool": SeleniumScrapingTool(),
-    "XMLSearchTool": XMLSearchTool(config=config),
-    "YoutubeChannelSearchTool": YoutubeChannelSearchTool(config=config),
-    "YoutubeVideoSearchTool": YoutubeVideoSearchTool(config=config),
-    "NextCloudTool":NextCloudTool(),
-}
+    available_tools = {
+        "SecureContactManager": SecureContactManagerTool(),
+        "EncryptDataTool": EncryptDataTool(),
+        "APICallTool": APICallTool(),
+        "TaskTrackerTool": TaskTrackerTool(),
+        "MemoryManagerTool": MemoryManagerTool(),
+        "WebsiteSearchTool": WebsiteSearchTool(config=config),
+        "FileReadTool": FileReadTool(),
+        "ScrapeWebsiteTool": ScrapeWebsiteTool(),
+        "DirectoryReadTool": DirectoryReadTool(),
+        "SerperDevTool": SerperDevTool() if os.environ.get("SERPER_API_KEY") else None,
+        "TXTSearchTool": TXTSearchTool(config=config),
+        "EXASearchTool": EXASearchTool(),
+        "CodeDocsSearchTool": CodeDocsSearchTool(config=config),
+        "CodeInterpreterTool": CodeInterpreterTool(),
+        "CSVSearchTool": CSVSearchTool(config=config),
+        "DOCXSearchTool": DOCXSearchTool(config=config),
+        "DirectorySearchTool": DirectorySearchTool(config=config),
+        "JSONSearchTool": JSONSearchTool(config=config),
+        "MDXSearchTool": MDXSearchTool(config=config),
+        "PDFSearchTool": PDFSearchTool(config=config),
+        "RagTool": RagTool(config=config),
+        "ScrapeElementFromWebsiteTool": ScrapeElementFromWebsiteTool(),
+        "SeleniumScrapingTool": SeleniumScrapingTool(),
+        "XMLSearchTool": XMLSearchTool(config=config),
+        "YoutubeChannelSearchTool": YoutubeChannelSearchTool(config=config),
+        "YoutubeVideoSearchTool": YoutubeVideoSearchTool(config=config),
+        "NextCloudTool":NextCloudTool(),
+    }
 
-available_tools = {k: v for k, v in available_tools.items() if v is not None}
-# Enhanced Executive Assistant with Stock Capabilities
-executive_assistant = Agent(
-    role='Executive Personal Assistant with Stock Expertise',
-    goal='Support a high-level executive with optimized task execution and stock market assistance using long-term and short-term memory',
-    backstory="""You are an elite AI assistant created by xAI, blending executive support with stock market expertise. You manage schedules, briefings, communications, and crises, while also tracking stock prices, portfolios, and purchase-based profit reminders in any currency. Use YahooFinanceTool for stock data (USD), converting to the user's currency (DatabaseTool preference 'currency', default 'USD') with rates: USD=1, INR=83, EUR=0.85, GBP=0.73. Handle queries like 'Set my currency to INR,' 'Remind me when Tesla I bought at ₹200 hits ₹350 or more with ₹150 profit,' or 'What’s the current price of Tesla stock?'""",
-    verbose=True,
-    allow_delegation=False,
-    llm=get_model(),
-    tools=[YahooFinanceTool(), DatabaseTool()] + list(available_tools.values())
-)
-
-manager_agent = Agent(
-    role='Task Manager',
-    goal='Optimize task assignment with minimal LLM requests using memory and caching',
-    backstory="""You are an AI manager created by xAI, designed to reduce LLM usage with smart task delegation.""",
-    verbose=True,
-    allow_delegation=True,
-    llm=get_model()
-)
-
-# Existing Tasks (unchanged for brevity)
-def create_schedule_task(user_input):
-    return Task(
-        description=f"Create a detailed schedule: {user_input}.",
-        agent=executive_assistant,
-        expected_output="Comprehensive schedule with time blocks, locations, attendees, and priorities",
-        tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]]
+    available_tools = {k: v for k, v in available_tools.items() if v is not None}
+    # Enhanced Executive Assistant with Stock Capabilities
+    executive_assistant = Agent(
+        role='Executive Personal Assistant with Stock Expertise',
+        goal='Support a high-level executive with optimized task execution and stock market assistance using long-term and short-term memory',
+        backstory="""You are an elite AI assistant created by xAI, blending executive support with stock market expertise. You manage schedules, briefings, communications, and crises, while also tracking stock prices, portfolios, and purchase-based profit reminders in any currency. Use YahooFinanceTool for stock data (USD), converting to the user's currency (DatabaseTool preference 'currency', default 'USD') with rates: USD=1, INR=83, EUR=0.85, GBP=0.73. Handle queries like 'Set my currency to INR,' 'Remind me when Tesla I bought at ₹200 hits ₹350 or more with ₹150 profit,' or 'What’s the current price of Tesla stock?'""",
+        verbose=True,
+        allow_delegation=False,
+        llm=get_model(),
+        tools=[YahooFinanceTool(), DatabaseTool()] + list(available_tools.values())
     )
 
-def prepare_briefing_task(topic):
-    return Task(
-        description=f"Prepare a briefing on: {topic}.",
-        agent=executive_assistant,
-        expected_output="Concise briefing with key points, data, and recommendations",
-        tools=[available_tools["WebsiteSearchTool"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"]]
-    )
-def draft_communication_task(details):
-    return Task(
-        description=f"Draft a formal communication: {details}.",
-        agent=executive_assistant,
-        expected_output="Polished, professional communication draft",
-        tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]]
-    )
-def crisis_management_task(situation): return Task(description=f"Develop a crisis plan for: {situation}.", agent=executive_assistant, expected_output="Crisis response plan with actions, contacts, and communication outline", tools=[available_tools["SecureContactManager"], available_tools["APICallTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-def handle_confidential_file_task(file_path, action): return Task(description=f"Handle confidential file at: {file_path}, action: {action}.", agent=executive_assistant, expected_output="Summary of file contents or secure storage confirmation", tools=[available_tools["FileReadTool"], available_tools["EncryptDataTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-def stakeholder_update_task(stakeholder_info): return Task(description=f"Prepare stakeholder update: {stakeholder_info}.", agent=executive_assistant, expected_output="Tailored stakeholder update", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
-def manage_contact_task(action, name=None, role=None, contact_info=None): return Task(description=f"Manage contacts: Action: {action}, Name: {name}, Role: {role}, Info: {contact_info}.", agent=executive_assistant, expected_output="Result of contact management action", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
-def prepare_meeting_task(meeting_details): return Task(description=f"Prepare meeting: {meeting_details}.", agent=executive_assistant, expected_output="Meeting agenda with attendees and background information", tools=[available_tools["SecureContactManager"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-def review_history_task(): return Task(description="Retrieve request history from database.", agent=executive_assistant, expected_output="Sanitized list of previous requests with timestamps", tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-def analyze_competitor_task(company): return Task(description=f"Analyze competitor: {company}.", agent=executive_assistant, expected_output="Competitor analysis with market position, strengths, and weaknesses", tools=[available_tools["NextCloudTool"], available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-def generate_report_task(data_file, format): return Task(description=f"Generate report from: {data_file} in {format}.", agent=executive_assistant, expected_output=f"Formatted report in {format}", tools=[available_tools["NextCloudTool"], available_tools["FileReadTool"], available_tools["CSVSearchTool"], available_tools["MemoryManagerTool"]])
-def monitor_news_task(topic): return Task(description=f"Monitor news on: {topic}.", agent=executive_assistant, expected_output="Summary of recent news and trends", tools=[available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-def review_code_task(repo_url): return Task(description=f"Review code at: {repo_url}.", agent=executive_assistant, expected_output="Code review with suggestions and findings", tools=[available_tools["GithubSearchTool"], available_tools["CodeInterpreterTool"], available_tools["MemoryManagerTool"]])
-def fetch_external_data_task(api_url): return Task(description=f"Fetch data from external API: {api_url}.", agent=executive_assistant, expected_output="Processed data from the API", tools=[available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-def track_task_status_task(task_id, status=None, result=None): return Task(description=f"Track task status: {task_id}, Status: {status}, Result: {result}.", agent=executive_assistant, expected_output="Task status update or retrieval result", tools=[available_tools["TaskTrackerTool"], available_tools["MemoryManagerTool"]])
-def schedule_follow_up_task(contact_name, message): return Task(description=f"Schedule a follow-up with {contact_name}: {message}.", agent=executive_assistant, expected_output="Confirmation of follow-up scheduling", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
-
-# New Stock-Related Tasks
-def check_stock_price_task(ticker):
-    return Task(
-        description=f"Check the current stock price for {ticker}.",
-        agent=executive_assistant,
-        expected_output="Current stock price and trend in the user's preferred currency",
-        tools=[YahooFinanceTool(), DatabaseTool()]
+    manager_agent = Agent(
+        role='Task Manager',
+        goal='Optimize task assignment with minimal LLM requests using memory and caching',
+        backstory="""You are an AI manager created by xAI, designed to reduce LLM usage with smart task delegation.""",
+        verbose=True,
+        allow_delegation=True,
+        llm=get_model()
     )
 
-def set_currency_task(currency):
-    return Task(
-        description=f"Set the user's preferred currency to {currency}.",
-        agent=executive_assistant,
-        expected_output=f"Confirmation that currency is set to {currency}",
-        tools=[DatabaseTool()]
-    )
+    # Existing Tasks (unchanged for brevity)
+    def create_schedule_task(user_input):
+        return Task(
+            description=f"Create a detailed schedule: {user_input}.",
+            agent=executive_assistant,
+            expected_output="Comprehensive schedule with time blocks, locations, attendees, and priorities",
+            tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]]
+        )
 
-def add_stock_purchase_task(ticker, purchase_price, currency, target_price=None, min_profit=None):
-    return Task(
-        description=f"Add a stock purchase for {ticker} at {currency}{purchase_price}, optionally set a profit reminder for target {currency}{target_price} with minimum profit {currency}{min_profit}.",
-        agent=executive_assistant,
-        expected_output="Confirmation of purchase addition and optional reminder setup",
-        tools=[YahooFinanceTool(), DatabaseTool()]
-    )
+    def prepare_briefing_task(topic):
+        return Task(
+            description=f"Prepare a briefing on: {topic}.",
+            agent=executive_assistant,
+            expected_output="Concise briefing with key points, data, and recommendations",
+            tools=[available_tools["WebsiteSearchTool"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"]]
+        )
+    def draft_communication_task(details):
+        return Task(
+            description=f"Draft a formal communication: {details}.",
+            agent=executive_assistant,
+            expected_output="Polished, professional communication draft",
+            tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]]
+        )
+    def crisis_management_task(situation): return Task(description=f"Develop a crisis plan for: {situation}.", agent=executive_assistant, expected_output="Crisis response plan with actions, contacts, and communication outline", tools=[available_tools["SecureContactManager"], available_tools["APICallTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
+    def handle_confidential_file_task(file_path, action): return Task(description=f"Handle confidential file at: {file_path}, action: {action}.", agent=executive_assistant, expected_output="Summary of file contents or secure storage confirmation", tools=[available_tools["FileReadTool"], available_tools["EncryptDataTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
+    def stakeholder_update_task(stakeholder_info): return Task(description=f"Prepare stakeholder update: {stakeholder_info}.", agent=executive_assistant, expected_output="Tailored stakeholder update", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
+    def manage_contact_task(action, name=None, role=None, contact_info=None): return Task(description=f"Manage contacts: Action: {action}, Name: {name}, Role: {role}, Info: {contact_info}.", agent=executive_assistant, expected_output="Result of contact management action", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
+    def prepare_meeting_task(meeting_details): return Task(description=f"Prepare meeting: {meeting_details}.", agent=executive_assistant, expected_output="Meeting agenda with attendees and background information", tools=[available_tools["SecureContactManager"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
+    def review_history_task(): return Task(description="Retrieve request history from database.", agent=executive_assistant, expected_output="Sanitized list of previous requests with timestamps", tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
+    def analyze_competitor_task(company): return Task(description=f"Analyze competitor: {company}.", agent=executive_assistant, expected_output="Competitor analysis with market position, strengths, and weaknesses", tools=[available_tools["NextCloudTool"], available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
+    def generate_report_task(data_file, format): return Task(description=f"Generate report from: {data_file} in {format}.", agent=executive_assistant, expected_output=f"Formatted report in {format}", tools=[available_tools["NextCloudTool"], available_tools["FileReadTool"], available_tools["CSVSearchTool"], available_tools["MemoryManagerTool"]])
+    def monitor_news_task(topic): return Task(description=f"Monitor news on: {topic}.", agent=executive_assistant, expected_output="Summary of recent news and trends", tools=[available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
+    def review_code_task(repo_url): return Task(description=f"Review code at: {repo_url}.", agent=executive_assistant, expected_output="Code review with suggestions and findings", tools=[available_tools["GithubSearchTool"], available_tools["CodeInterpreterTool"], available_tools["MemoryManagerTool"]])
+    def fetch_external_data_task(api_url): return Task(description=f"Fetch data from external API: {api_url}.", agent=executive_assistant, expected_output="Processed data from the API", tools=[available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
+    def track_task_status_task(task_id, status=None, result=None): return Task(description=f"Track task status: {task_id}, Status: {status}, Result: {result}.", agent=executive_assistant, expected_output="Task status update or retrieval result", tools=[available_tools["TaskTrackerTool"], available_tools["MemoryManagerTool"]])
+    def schedule_follow_up_task(contact_name, message): return Task(description=f"Schedule a follow-up with {contact_name}: {message}.", agent=executive_assistant, expected_output="Confirmation of follow-up scheduling", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
 
-def monitor_stock_task(ticker):
-    return Task(
-        description=f"Monitor stock {ticker} for real-time updates (simulated).",
-        agent=executive_assistant,
-        expected_output="Series of price updates for the stock in the user's currency",
-        tools=[YahooFinanceTool(), DatabaseTool()]
-    )
+    # New Stock-Related Tasks
+    def check_stock_price_task(ticker):
+        return Task(
+            description=f"Check the current stock price for {ticker}.",
+            agent=executive_assistant,
+            expected_output="Current stock price and trend in the user's preferred currency",
+            tools=[YahooFinanceTool(), DatabaseTool()]
+        )
 
-task_functions = {
-    name.replace("_task", ""): obj for name, obj in globals().items()
-    if callable(obj) and name.endswith("_task") and name != "decide_task_task"
-}
+    def set_currency_task(currency):
+        return Task(
+            description=f"Set the user's preferred currency to {currency}.",
+            agent=executive_assistant,
+            expected_output=f"Confirmation that currency is set to {currency}",
+            tools=[DatabaseTool()]
+        )
 
-class TrieNode:
-    def __init__(self):
-        self.children = defaultdict(TrieNode)
-        self.is_end = False
-        self.task_name = None
+    def add_stock_purchase_task(ticker, purchase_price, currency, target_price=None, min_profit=None):
+        return Task(
+            description=f"Add a stock purchase for {ticker} at {currency}{purchase_price}, optionally set a profit reminder for target {currency}{target_price} with minimum profit {currency}{min_profit}.",
+            agent=executive_assistant,
+            expected_output="Confirmation of purchase addition and optional reminder setup",
+            tools=[YahooFinanceTool(), DatabaseTool()]
+        )
 
-class TaskTrie:
-    def __init__(self):
-        self.root = TrieNode()
-        for task_name in task_functions.keys():
+    def monitor_stock_task(ticker):
+        return Task(
+            description=f"Monitor stock {ticker} for real-time updates (simulated).",
+            agent=executive_assistant,
+            expected_output="Series of price updates for the stock in the user's currency",
+            tools=[YahooFinanceTool(), DatabaseTool()]
+        )
+
+    task_functions = {
+        name.replace("_task", ""): obj for name, obj in globals().items()
+        if callable(obj) and name.endswith("_task") and name != "decide_task_task"
+    }
+
+    class TrieNode:
+        def __init__(self):
+            self.children = defaultdict(TrieNode)
+            self.is_end = False
+            self.task_name = None
+
+    class TaskTrie:
+        def __init__(self):
+            self.root = TrieNode()
+            for task_name in task_functions.keys():
+                node = self.root
+                for char in task_name:
+                    node = node.children[char]
+                node.is_end = True
+                node.task_name = task_name
+
+        def find_task(self, text):
             node = self.root
-            for char in task_name:
+            for char in text.lower():
+                if char not in node.children:
+                    return None
                 node = node.children[char]
-            node.is_end = True
-            node.task_name = task_name
+                if node.is_end:
+                    return node.task_name
+            return None
 
-    def find_task(self, text):
-        node = self.root
-        for char in text.lower():
-            if char not in node.children:
-                return None
-            node = node.children[char]
-            if node.is_end:
-                return node.task_name
-        return None
+    task_trie = TaskTrie()
 
-task_trie = TaskTrie()
-
-def decide_task_task(user_input):
-    request_hash = hashlib.md5(user_input.encode()).hexdigest()
-    cached_short = short_term_memory.get(f"decision_{request_hash}")
-    if cached_short:
+    def decide_task_task(user_input):
+        request_hash = hashlib.md5(user_input.encode()).hexdigest()
+        cached_short = short_term_memory.get(f"decision_{request_hash}")
+        if cached_short:
+            return Task(
+                description="Cached decision from short-term memory",
+                agent=manager_agent,
+                expected_output=cached_short
+            )
+        cursor.execute("SELECT response FROM cache WHERE request_hash = ?", (request_hash,))
+        cached_long = cursor.fetchone()
+        if cached_long:
+            short_term_memory.add(f"decision_{request_hash}", cached_long[0])
+            return Task(
+                description="Cached decision from long-term memory",
+                agent=manager_agent,
+                expected_output=cached_long[0]
+            )
+        task_list = ", ".join(task_functions.keys())
         return Task(
-            description="Cached decision from short-term memory",
+            description=f"Analyze input: '{user_input}'. Select task from: {task_list}. Extract params, return: {{'task': 'name', 'params': {{'key': 'value'}}}}. Default to 'prepare_briefing' if unsure.",
             agent=manager_agent,
-            expected_output=cached_short
+            expected_output="JSON-like string with task and parameters",
+            callback=lambda result: (
+                short_term_memory.add(f"decision_{request_hash}", str(result)),
+                cursor.execute("INSERT OR REPLACE INTO cache (request_hash, response) VALUES (?, ?)",
+                               (request_hash, str(result)))
+            )
         )
-    cursor.execute("SELECT response FROM cache WHERE request_hash = ?", (request_hash,))
-    cached_long = cursor.fetchone()
-    if cached_long:
-        short_term_memory.add(f"decision_{request_hash}", cached_long[0])
-        return Task(
-            description="Cached decision from long-term memory",
-            agent=manager_agent,
-            expected_output=cached_long[0]
-        )
-    task_list = ", ".join(task_functions.keys())
-    return Task(
-        description=f"Analyze input: '{user_input}'. Select task from: {task_list}. Extract params, return: {{'task': 'name', 'params': {{'key': 'value'}}}}. Default to 'prepare_briefing' if unsure.",
-        agent=manager_agent,
-        expected_output="JSON-like string with task and parameters",
-        callback=lambda result: (
-            short_term_memory.add(f"decision_{request_hash}", str(result)),
-            cursor.execute("INSERT OR REPLACE INTO cache (request_hash, response) VALUES (?, ?)",
-                           (request_hash, str(result)))
-        )
+
+    assistant_crew = Crew(
+        agents=[manager_agent, executive_assistant],
+        tasks=[],
+        verbose=True
     )
+    """
+    db_tool = DatabaseTool()
+    yahoo_tool = YahooFinanceTool()
+    alert_checker = AlertChecker(db_tool, yahoo_tool)
+    alert_checker.start()
+    
+    """
+    def process_request(user_input):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        request_hash = hashlib.md5(user_input.encode()).hexdigest()
 
-assistant_crew = Crew(
-    agents=[manager_agent, executive_assistant],
-    tasks=[],
-    verbose=True
-)
-"""
-db_tool = DatabaseTool()
-yahoo_tool = YahooFinanceTool()
-alert_checker = AlertChecker(db_tool, yahoo_tool)
-alert_checker.start()
+        cached_short = short_term_memory.get(f"response_{request_hash}")
+        if cached_short:
+            return cached_short
 
-"""
-def process_request(user_input):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    request_hash = hashlib.md5(user_input.encode()).hexdigest()
+        cursor.execute("SELECT response FROM request_history WHERE request = ? ORDER BY id DESC LIMIT 1", (user_input,))
+        cached_long = cursor.fetchone()
+        if cached_long and cached_long[0]:
+            short_term_memory.add(f"response_{request_hash}", cached_long[0])
+            return cached_long[0]
 
-    cached_short = short_term_memory.get(f"response_{request_hash}")
-    if cached_short:
-        return cached_short
+        quick_task = task_trie.find_task(user_input)
+        if quick_task and quick_task != "prepare_briefing":
+            params = {"user_input": user_input} if "user_input" in inspect.signature(
+                task_functions[quick_task]).parameters else {}
+            decision = json.dumps({"task": quick_task, "params": params})
+        else:
+            assistant_crew.tasks = [decide_task_task(user_input)]
+            decision = assistant_crew.kickoff()
+            conn.commit()
 
-    cursor.execute("SELECT response FROM request_history WHERE request = ? ORDER BY id DESC LIMIT 1", (user_input,))
-    cached_long = cursor.fetchone()
-    if cached_long and cached_long[0]:
-        short_term_memory.add(f"response_{request_hash}", cached_long[0])
-        return cached_long[0]
+        try:
+            decision_dict = json.loads(decision.replace("'", "\""))
+            task_name = decision_dict["task"]
+            params = decision_dict["params"]
+        except Exception as e:
+            task_name = "prepare_briefing"
+            params = {"topic": user_input}
 
-    quick_task = task_trie.find_task(user_input)
-    if quick_task and quick_task != "prepare_briefing":
-        params = {"user_input": user_input} if "user_input" in inspect.signature(
-            task_functions[quick_task]).parameters else {}
-        decision = json.dumps({"task": quick_task, "params": params})
-    else:
-        assistant_crew.tasks = [decide_task_task(user_input)]
-        decision = assistant_crew.kickoff()
-        conn.commit()
+        task_func = task_functions.get(task_name, prepare_briefing_task)
+        signature = inspect.signature(task_func)
+        task_params = {param: params.get(param, user_input if param == "user_input" else None)
+                       for param in signature.parameters}
+        task = task_func(**{k: v for k, v in task_params.items() if v is not None})
 
-    try:
-        decision_dict = json.loads(decision.replace("'", "\""))
-        task_name = decision_dict["task"]
-        params = decision_dict["params"]
-    except Exception as e:
-        task_name = "prepare_briefing"
-        params = {"topic": user_input}
+        if task_name == "handle_confidential_file" and params.get("action") == "store":
+            cursor.execute("INSERT OR REPLACE INTO confidential_notes (file_path, note) VALUES (?, ?)",
+                           (params.get("file_path", "unknown.txt"), f"Stored at {timestamp}"))
+            cursor.execute("INSERT OR REPLACE INTO long_term_memory (key, value, timestamp) VALUES (?, ?, ?)",
+                           (f"confidential_{params.get('file_path', 'unknown.txt')}", "Stored", timestamp))
 
-    task_func = task_functions.get(task_name, prepare_briefing_task)
-    signature = inspect.signature(task_func)
-    task_params = {param: params.get(param, user_input if param == "user_input" else None)
-                   for param in signature.parameters}
-    task = task_func(**{k: v for k, v in task_params.items() if v is not None})
+        if task_name == "review_history":
+            cursor.execute("SELECT timestamp, request FROM request_history")
+            history = cursor.fetchall()
+            task.expected_output = "\n".join([f"{ts}: {req}" for ts, req in history])
 
-    if task_name == "handle_confidential_file" and params.get("action") == "store":
-        cursor.execute("INSERT OR REPLACE INTO confidential_notes (file_path, note) VALUES (?, ?)",
-                       (params.get("file_path", "unknown.txt"), f"Stored at {timestamp}"))
+        assistant_crew.tasks = [task]
+        result = assistant_crew.kickoff()
+
+        short_term_memory.add(f"response_{request_hash}", str(result))
+        cursor.execute("INSERT INTO request_history (timestamp, request, response) VALUES (?, ?, ?)",
+                       (timestamp, user_input, str(result)))
         cursor.execute("INSERT OR REPLACE INTO long_term_memory (key, value, timestamp) VALUES (?, ?, ?)",
-                       (f"confidential_{params.get('file_path', 'unknown.txt')}", "Stored", timestamp))
-
-    if task_name == "review_history":
-        cursor.execute("SELECT timestamp, request FROM request_history")
-        history = cursor.fetchall()
-        task.expected_output = "\n".join([f"{ts}: {req}" for ts, req in history])
-
-    assistant_crew.tasks = [task]
-    result = assistant_crew.kickoff()
-
-    short_term_memory.add(f"response_{request_hash}", str(result))
-    cursor.execute("INSERT INTO request_history (timestamp, request, response) VALUES (?, ?, ?)",
-                   (timestamp, user_input, str(result)))
-    cursor.execute("INSERT OR REPLACE INTO long_term_memory (key, value, timestamp) VALUES (?, ?, ?)",
-                   (f"task_{task_name}_{request_hash}", str(result), timestamp))
-    if task_name in ["create_schedule", "draft_communication", "crisis_management"]:
-        task_id = request_hash
-        cursor.execute("INSERT OR REPLACE INTO tasks_status (task_id, status, result) VALUES (?, ?, ?)",
-                       (task_id, "completed", str(result)))
-    conn.commit()
-    conn.close()
-    return result
+                       (f"task_{task_name}_{request_hash}", str(result), timestamp))
+        if task_name in ["create_schedule", "draft_communication", "crisis_management"]:
+            task_id = request_hash
+            cursor.execute("INSERT OR REPLACE INTO tasks_status (task_id, status, result) VALUES (?, ?, ?)",
+                           (task_id, "completed", str(result)))
+        conn.commit()
+        conn.close()
+        return result
 

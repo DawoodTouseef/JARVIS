@@ -12,20 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import uuid
+import logging
+import os
+import json
+import shutil
+import requests
 from PyQt5.QtWidgets import (
-     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QCheckBox, QPushButton, QStackedWidget, QWidget,QMessageBox,QComboBox,QFileDialog,QScrollArea
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox, QPushButton,
+    QStackedWidget, QWidget, QMessageBox, QComboBox, QFileDialog, QScrollArea
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont,QIcon
-import os
-from config import SESSION_PATH, JARVIS_DIR,Model
-import shutil
-import json
-from utils.models.users import Users
-from gui.MemorySetting import MemorySettings
-from utils.models.agents import Agent
+from PyQt5.QtGui import QFont, QIcon
+from config import SESSION_PATH, JARVIS_DIR, Model
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
+from core.memory.memory_agent import MemorySettings
+from jarvis_integration.models.agents import Agent
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 class ClickableLabel(QLabel):
     """Custom QLabel to make it clickable."""
@@ -39,7 +45,6 @@ class ClickableLabel(QLabel):
         """Emit clicked signal when label is clicked."""
         self.clicked.emit(self.text())
         super().mousePressEvent(event)
-
 
 class AndroidSettingsDialog(QDialog):
     """A QDialog with multiple pages mimicking Android settings."""
@@ -80,6 +85,7 @@ class AndroidSettingsDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
+        """Initialize the UI components."""
         layout = QVBoxLayout()
 
         # Search Bar
@@ -102,12 +108,8 @@ class AndroidSettingsDialog(QDialog):
         self.huggingface_settings_page = QWidget()
         self.llm_model_settings_page = QWidget()
         self.vision_model_settings_page = QWidget()
-        self.connection_page = QWidget(self.scroll_area)
-        self.connection_page.setStyleSheet("""
-        *{
-            border:none;
-        }
-        """)
+        self.connection_page = QWidget()
+        self.connection_page.setStyleSheet("border: none;")
         self.stacked_widget.addWidget(self.main_page)
         self.stacked_widget.addWidget(self.detail_page)
         self.stacked_widget.addWidget(self.llm_settings_page)
@@ -125,9 +127,9 @@ class AndroidSettingsDialog(QDialog):
         self.main_layout = QVBoxLayout()
 
         # Sections with Toggles
-        self.add_settings_section("General", ["Agent", "Memory","LLM Settings"])
+        self.add_settings_section("General", ["Agent", "Memory", "LLM Settings"])
         self.add_settings_section("Wake Word", ["Wake Word Settings"])
-        self.add_settings_section("Integrations",['Integration'])
+        self.add_settings_section("Integrations", ["Integration"])
         self.add_settings_section("User", ["Logout"])
 
         # Message for "No Setting Available"
@@ -182,7 +184,7 @@ class AndroidSettingsDialog(QDialog):
         label.clicked.connect(self.go_to_detail_page)
         row_layout.addWidget(label)
 
-        # Toggle Switch (without page navigation)
+        # Toggle Switch
         toggle = QCheckBox()
         toggle.setStyleSheet("""
             QCheckBox::indicator {
@@ -206,10 +208,8 @@ class AndroidSettingsDialog(QDialog):
         while self.config_button.count():
             item = self.config_button.takeAt(0)
             if item.widget():
-                # If it's a widget, delete it
                 item.widget().deleteLater()
             elif item.layout():
-                # If it's a layout, recursively clear it
                 self.clear_layout(item.layout())
 
     def clear_layout(self, layout):
@@ -231,21 +231,27 @@ class AndroidSettingsDialog(QDialog):
         back_button = QPushButton("Back")
         back_button.clicked.connect(self.go_back)
         layout.addWidget(back_button, alignment=Qt.AlignLeft)
-        with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-            data = json.load(f)
-        if "email" in data:
-            users = Users.get_user_by_email(data['email'])
-            if users.settings is not None:
-                wakeword_engine = json.loads(users.settings.json()).get('wakeword').get('wakeword_engine')
-                engine_label = QLabel(f"Wake Word Engine Selected: {wakeword_engine}")
-                layout.addWidget(engine_label)
+
+        # Load user and preferences
+        user_id = self.get_current_user_id()
+        if not user_id:
+            engine_label = QLabel("Error: No user logged in")
+            layout.addWidget(engine_label)
+            page.setLayout(layout)
+            return page
+
+        # Fetch wake word settings from preferences
+        wakeword_prefs = Preferences.get_preferences_by_user_id(user_id)
+        wakeword_config = next((pref.setting_value for pref in wakeword_prefs if pref.setting_key == "wakeword"), {})
+
         # Wake Word Engine Dropdown
         engine_layout = QHBoxLayout()
-        engine_label = QLabel("Wake Word Engine:")
+        engine_label = QLabel(f"Wake Word Engine Selected: {wakeword_config.get('wakeword_engine', 'None')}")
         self.wakeword_engine = QComboBox()
-        self.wakeword_engine.addItems(["Select Engine","pvporcupine", "openwakeword"])
+        self.wakeword_engine.addItems(["Select Engine", "pvporcupine", "openwakeword"])
+        self.wakeword_engine.setCurrentText(wakeword_config.get("wakeword_engine", "Select Engine"))
         engine_layout.addWidget(engine_label)
-        engine_layout.addWidget(self.wakeword_engine,alignment=Qt.AlignCenter)
+        engine_layout.addWidget(self.wakeword_engine, alignment=Qt.AlignCenter)
         self.wakeword_engine.currentIndexChanged.connect(self.wakeword_click_action)
         layout.addLayout(engine_layout)
 
@@ -253,26 +259,32 @@ class AndroidSettingsDialog(QDialog):
         self.config_button = QVBoxLayout()
         layout.addLayout(self.config_button)
 
+        # Preload settings if available
+        if wakeword_config:
+            self.wakeword_click_action(self.wakeword_engine.currentIndex())
+
         page.setLayout(layout)
         return page
-    def wakeword_click_action(self,index,row=None):
+
+    def wakeword_click_action(self, index, row=None):
+        """Handle wake word engine selection."""
         self.clear_dynamic_widgets()
         layout = self.config_button
-        if index==1:
-            api_key = None
-            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data['email'])
-                if users.settings is not None:
-                    api_key = json.loads(users.settings.json()).get('wakeword').get('api_key')
+
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        # Load existing wake word settings
+        wakeword_prefs = Preferences.get_preferences_by_user_id(user_id)
+        wakeword_config = next((pref.setting_value for pref in wakeword_prefs if pref.setting_key == "wakeword"), {})
+
+        if index == 1:  # pvporcupine
             # API Key Input
             api_layout = QHBoxLayout()
             api_label = QLabel("API Key:")
-            if api_key is None:
-                self.api_input = QLineEdit()
-            else:
-                self.api_input = QLineEdit(api_key)
+            self.api_input = QLineEdit(wakeword_config.get("api_key", ""))
             self.api_input.setPlaceholderText("Enter pvporcupine API key")
             api_layout.addWidget(api_label)
             api_layout.addWidget(self.api_input)
@@ -281,17 +293,7 @@ class AndroidSettingsDialog(QDialog):
             # Model File Upload
             model_layout = QHBoxLayout()
             model_label = QLabel("Upload Model (Optional):")
-            model_path = None
-            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data['email'])
-                if users.settings is not None:
-                    model_path = json.loads(users.settings.json()).get('wakeword').get('model_path')
-            if model_path is not None:
-                self.model_input = QLineEdit(model_path)
-            else:
-                self.model_input = QLineEdit()
+            self.model_input = QLineEdit(wakeword_config.get("model_path", ""))
             self.model_input.setPlaceholderText("No file selected")
             browse_button = QPushButton("Browse")
             browse_button.clicked.connect(self.browse_model_file)
@@ -302,23 +304,14 @@ class AndroidSettingsDialog(QDialog):
 
             # Save Button
             save_button = QPushButton("Save")
-            save_button.clicked.connect(self.save_configuration)
+            save_button.clicked.connect(self.save_wakeword_configuration)
             layout.addWidget(save_button, alignment=Qt.AlignCenter)
-        elif index==2:
+
+        elif index == 2:  # openwakeword
             # Model File Upload
             model_layout = QHBoxLayout()
             model_label = QLabel("Upload Model:")
-            model_path = None
-            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data['email'])
-                if users.settings is not None:
-                    model_path = json.loads(users.settings.json()).get('wakeword').get('model_path')
-            if model_path is not None:
-                self.model_input = QLineEdit(model_path)
-            else:
-                self.model_input = QLineEdit()
+            self.model_input = QLineEdit(wakeword_config.get("model_path", ""))
             self.model_input.setPlaceholderText("No file selected")
             browse_button = QPushButton("Browse")
             browse_button.clicked.connect(self.browse_model_file)
@@ -329,7 +322,7 @@ class AndroidSettingsDialog(QDialog):
 
             # Save Button
             save_button = QPushButton("Save")
-            save_button.clicked.connect(self.save_configuration)
+            save_button.clicked.connect(self.save_wakeword_configuration)
             layout.addWidget(save_button, alignment=Qt.AlignCenter)
 
     def browse_model_file(self):
@@ -337,60 +330,65 @@ class AndroidSettingsDialog(QDialog):
         wakeword_engine = self.wakeword_engine.currentText()
         file_filter = "All Files (*)"  # Default filter
 
-        # Set file filter based on the selected wake word engine
         if wakeword_engine == "pvporcupine":
             file_filter = "Porcupine Model Files (*.ppn)"
         elif wakeword_engine == "openwakeword":
             file_filter = "OpenWakeWord Model Files (*.tflite *.onnx)"
 
-        # Open file dialog with the specific file filter
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Wake Word Model File", "", file_filter)
-
         if file_path:
             self.model_input.setText(file_path)
 
+    def save_wakeword_configuration(self):
+        """Save the wake word configuration to the preference table."""
+        wakeword_engine = self.wakeword_engine.currentText()
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
-    def save_configuration(self):
-            """Save the API key and optional model file."""
-            wakeword_engine=self.wakeword_engine.currentText()
+        if wakeword_engine == "Select Engine":
+            QMessageBox.warning(self, "Save Failed", "Please select a wake word engine!")
+            return
 
-            if "pvporcupine" in wakeword_engine:
-                api_key = self.api_input.text().strip()
-                if not api_key and "pvporcupine" in wakeword_engine:
-                    QMessageBox.warning(self, "Save Failed", "API Key is required!")
-                    return
-            model_file = self.model_input.text().strip()
-            if not model_file and "openwakword"  in wakeword_engine:
-                QMessageBox.warning(self, "Save Failed", "Model File is required!")
+        config = {"wakeword_engine": wakeword_engine}
+        if wakeword_engine == "pvporcupine":
+            api_key = self.api_input.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "Save Failed", "API Key is required for pvporcupine!")
                 return
-            # Save model file to the target directory
-            model_path = ""
-            if model_file:
-                MODEL_SAVE_PATH = os.path.join(SESSION_PATH, "wakeword")
-                if not os.path.exists(MODEL_SAVE_PATH):
-                    os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
-                model_name = os.path.basename(model_file)
-                model_path = os.path.join(MODEL_SAVE_PATH, model_name)
-                shutil.copyfile(model_file, model_path)
+            config["api_key"] = api_key
 
-            # Save configuration
-            config = {"wakeword_engine": wakeword_engine}
-            if wakeword_engine in [] and model_path is not None:
-                config["model_path"]= model_path
-            if "pvporcupine" in wakeword_engine:
-                config["api_key"]=api_key
-            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data['email'])
-                if users:
-                    settings = {}
-                    if users.settings:
-                        settings.update(users.settings)
-                    settings['wakeword']=config
-                    Users.update_user_by_id(id=users.id, updated={"settings": settings})
+        model_file = self.model_input.text().strip()
+        if wakeword_engine == "openwakeword" and not model_file:
+            QMessageBox.warning(self, "Save Failed", "Model File is required for openwakeword!")
+            return
 
-            QMessageBox.information(self, "Saved", "Wake word configuration saved successfully!")
+        if model_file:
+            MODEL_SAVE_PATH = os.path.join(SESSION_PATH, "wakeword")
+            os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
+            model_name = os.path.basename(model_file)
+            model_path = os.path.join(MODEL_SAVE_PATH, model_name)
+            shutil.copyfile(model_file, model_path)
+            config["model_path"] = model_path
+
+        # Save to preference table
+        wakeword_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in wakeword_prefs if pref.setting_key == "wakeword"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="wakeword",
+                setting_value=config
+            )
+
+        QMessageBox.information(self, "Saved", "Wake word configuration saved successfully!")
 
     def create_memory_page(self):
         """Create the memory configuration page."""
@@ -425,6 +423,12 @@ class AndroidSettingsDialog(QDialog):
         engine_label = QLabel("Memory Type:")
         self.memory_engine_dropdown = QComboBox()
         self.memory_engine_dropdown.addItems(["Select Type", "Online", "Offline"])
+        user_id = self.get_current_user_id()
+        memory_prefs = Preferences.get_preferences_by_user_id(user_id)
+        memory_config = next((pref.setting_value for pref in memory_prefs if pref.setting_key == "memory"), {})
+        self.memory_engine_dropdown.setCurrentText(
+                "Online" if memory_config.get("memo_engine") == "online" else "Offline" if memory_config else "Select Type"
+        )
         self.memory_engine_dropdown.currentIndexChanged.connect(self.memory_click_action)
         engine_layout.addWidget(engine_label)
         engine_layout.addWidget(self.memory_engine_dropdown)
@@ -442,22 +446,19 @@ class AndroidSettingsDialog(QDialog):
         self.clear_dynamic_widgets()
         layout = self.config_button
 
-        if index == 1:  # Online Memory
-            api_key = ""
-            try:
-                with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                    data = json.load(f)
-                if "email" in data:
-                    users = Users.get_user_by_email(data["email"])
-                    if users and users.settings:
-                        api_key = json.loads(users.settings.json()).get("memory", {}).get("api_key", "")
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to load API key: {e}")
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
+        memory_prefs = Preferences.get_preferences_by_user_id(user_id)
+        memory_config = next((pref.setting_value for pref in memory_prefs if pref.setting_key == "memory"), {})
+
+        if index == 1:  # Online Memory
             # API Key Input
             api_layout = QHBoxLayout()
             api_label = QLabel("API Key:")
-            self.api_input = QLineEdit(api_key)
+            self.api_input = QLineEdit(memory_config.get("api_key", ""))
             self.api_input.setPlaceholderText("Enter Memo Client API Key")
             api_layout.addWidget(api_label)
             api_layout.addWidget(self.api_input)
@@ -469,34 +470,40 @@ class AndroidSettingsDialog(QDialog):
             layout.addWidget(save_button, alignment=Qt.AlignCenter)
 
     def memory_save_configuration(self):
-        """Save the memory API key configuration."""
-        api_key = self.api_input.text().strip()
+        """Save the memory configuration to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
+        api_key = self.api_input.text().strip()
         if not api_key:
             QMessageBox.warning(self, "Save Failed", "API Key is required!")
             return
 
-        try:
-            # Save configuration to the database
-            config = {"memo_engine": "online", "api_key": api_key}
-            with open(os.path.join(SESSION_PATH, "session.json"), "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    settings = users.settings.json() if users.settings else {}
-                    settings = json.loads(settings)
-                    settings["memory"] = config
-                    Users.update_user_by_id(id=users.id, updated={"settings": settings})
+        config = {"memo_engine": "online", "api_key": api_key}
+        memory_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in memory_prefs if pref.setting_key == "memory"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="memory",
+                setting_value=config
+            )
 
-            QMessageBox.information(self, "Saved", "Memory configuration saved successfully!")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save configuration: {e}")
+        QMessageBox.information(self, "Saved", "Memory configuration saved successfully!")
 
     def clear_memory_action(self):
         """Clear memory for the current user."""
         try:
             memory_settings = MemorySettings()
+            memory_settings._initialize_memory()
             memory_settings.clear_memory()
             QMessageBox.information(self, "Memory Cleared", "All memory data has been cleared successfully!")
         except Exception as e:
@@ -533,37 +540,30 @@ class AndroidSettingsDialog(QDialog):
 
         self.llm_settings_page.setLayout(layout)
 
-    def get_model(self,models:list):
-        """
-        :return:
-        """
-        session_json = os.path.join(SESSION_PATH, "session.json")
-        if os.path.exists(os.path.join(SESSION_PATH, "session.json")):
-            with open(session_json, "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data.get("email"))
-                if users:
-                    if users.settings:
-                        settings = json.loads(users.settings.json())
-                        if "openai" in settings:
-                            openai = settings['openai']
-                            for i in openai:
-                                model=self.get_all_models_raw(i["base_url"],i["api_key"])['data']
-                                for j in model:
-                                    models.append(Model(**{
-                                            "name":j.get('name',j['id']),
-                                            "type":"openai",
-                                            "url":i['base_url'],
-                                            "api_key":i["api_key"]
-                                            }
-                                        )
-                                    )
+    def get_model(self, models: list):
+        """Fetch available models from preferences."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            logger.warning("No user logged in when fetching models")
+            return
+
+        openai_prefs = Preferences.get_preferences_by_user_id(user_id)
+        openai_config = next((pref.setting_value for pref in openai_prefs if pref.setting_key == "openai"),  [])
+        for conn in openai_config:
+            try:
+                model_data = self.get_all_models_raw(conn["base_url"].replace('"',""), conn["api_key"])['data']
+                for j in model_data:
+                    models.append(Model(**{
+                        "name": j.get('name', j['id']),
+                        "type": "openai",
+                        "url": conn["base_url"].replace('"',""),
+                        "api_key": conn["api_key"]
+                    }))
+            except Exception as e:
+                logger.error(f"Error fetching models for {conn['base_url'].replace('"',"")}: {e}")
 
     def create_llm_model_page(self):
-        """
-        Create the LLM settings page with improved UI and search functionality.
-        """
+        """Create the LLM settings page with improved UI and search functionality."""
         layout = QVBoxLayout()
 
         # Back Button
@@ -616,48 +616,48 @@ class AndroidSettingsDialog(QDialog):
         # Save Button
         save_button = QPushButton("Save Model")
         save_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px;")
-        save_button.clicked.connect(lambda: self.save_model_selection( model_dropdown.currentText()))
+        save_button.clicked.connect(lambda: self.save_model_selection(model_dropdown.currentText()))
         layout.addWidget(save_button)
 
         self.llm_model_settings_page.setLayout(layout)
 
     def save_model_selection(self, model_name):
-        """
-        Save selected model information to a JSON file.
-        """
-        try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if os.path.exists(session_file):
-                with open(session_file, "r") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    if users.settings is None:
-                        users.settings = {}
+        """Save selected LLM model to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
-                    if not isinstance(users.settings.json(), dict):
-                        users.settings = json.loads(users.settings.json())
-                    models = []
-                    self.get_model(models)
-                    urls_api_key = {}
-                    for m in models:
-                        if model_name in m.name:
-                            urls_api_key.update(
-                                {"url": m.url, "name": model_name, "type": "openai", "api_key": m.api_key}
-                            )
-                    users.settings["model"] = urls_api_key
-                    Users.update_user_by_id(id=users.id, updated={"settings": users.settings})
-                    QMessageBox.information(self, "LLM", f"Model Selected successfully!")
-        except Exception as e:
-            QMessageBox.critical(self,"LLM",f"Error saving model selection: {e}")
+        models = []
+        self.get_model(models)
+        model_config = {}
+        for m in models:
+            if model_name in m.name:
+                model_config = {"url": m.url, "name": model_name, "type": "openai", "api_key": m.api_key}
+
+        if not model_config:
+            QMessageBox.warning(self, "Error", "Model not found!")
+            return
+
+        llm_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in llm_prefs if pref.setting_key == "llm_model"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": model_config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="llm_model",
+                setting_value=model_config
+            )
+
+        QMessageBox.information(self, "LLM", "Model selected successfully!")
 
     def create_vision_model_page(self):
-        """
-        Create the LLM settings page with improved UI and search functionality.
-        """
+        """Create the vision model settings page."""
         layout = QVBoxLayout()
 
         # Back Button
@@ -716,42 +716,42 @@ class AndroidSettingsDialog(QDialog):
         self.vision_model_settings_page.setLayout(layout)
 
     def save_vision_model_selection(self, model_name):
-        """
-        Save selected model information to a JSON file.
-        """
-        try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if os.path.exists(session_file):
-                with open(session_file, "r") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    if users.settings is None:
-                        users.settings = {}
+        """Save selected vision model to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
-                    if not isinstance(users.settings.json(), dict):
-                        users.settings = json.loads(users.settings.json())
-                    models = []
-                    self.get_model(models)
-                    urls_api_key = {}
-                    for m in models:
-                        if model_name in m.name:
-                            urls_api_key.update(
-                                {"url": m.url, "name": model_name, "type": "openai", "api_key": m.api_key}
-                            )
-                    users.settings["vision"] = urls_api_key
-                    Users.update_user_by_id(id=users.id, updated={"settings": users.settings})
-                    QMessageBox.information(self, "Vision LLM", f"Model Selected successfully!")
-        except Exception as e:
-            QMessageBox.critical(self,"Vision LLM",f"Error saving model selection: {e}")
+        models = []
+        self.get_model(models)
+        model_config = {}
+        for m in models:
+            if model_name in m.name:
+                model_config = {"url": m.url, "name": model_name, "type": "openai", "api_key": m.api_key}
+
+        if not model_config:
+            QMessageBox.warning(self, "Error", "Model not found!")
+            return
+
+        vision_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in vision_prefs if pref.setting_key == "vision_model"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": model_config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="vision_model",
+                setting_value=model_config
+            )
+
+        QMessageBox.information(self, "Vision LLM", "Model selected successfully!")
+
     def create_huggingface_page(self):
-        """
-        Create the Hugging Face settings page.
-        """
-        # Initialize the page widget if not already done
+        """Create the HuggingFace settings page."""
         layout = QVBoxLayout()
 
         # Back Button
@@ -762,28 +762,15 @@ class AndroidSettingsDialog(QDialog):
         # API Key Input
         api_key_label = QLabel("HuggingFace API Key:")
         layout.addWidget(api_key_label)
-        api_key=""
-        try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if os.path.exists(session_file):
-                with open(session_file, "r") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    if users.settings is None:
-                        users.settings = {}
-
-                    if not isinstance(users.settings.json(), dict):
-                        users.settings = json.loads(users.settings.json())
-                    api_key=users.settings["huggingface_token"]
-        except Exception as e:
-            pass
+        user_id = self.get_current_user_id()
+        api_key = ""
+        if user_id:
+            hf_prefs = Preferences.get_preferences_by_user_id(user_id)
+            hf_config = next((pref.setting_value for pref in hf_prefs if pref.setting_key == "huggingface"), {})
+            api_key = hf_config.get("api_key", "")
         hf_api_key_input = QLineEdit(api_key)
         hf_api_key_input.setPlaceholderText("Enter HuggingFace API Key")
-        hf_api_key_input.setEchoMode(QLineEdit.Password)  # Hide API Key by default
+        hf_api_key_input.setEchoMode(QLineEdit.Password)
         layout.addWidget(hf_api_key_input)
 
         # Show/Hide API Key toggle
@@ -797,60 +784,62 @@ class AndroidSettingsDialog(QDialog):
 
         # Save Button
         save_button = QPushButton("Save")
-        save_button.clicked.connect(lambda :self.save_huggingface_api_key(hf_api_key_input.text()))
+        save_button.clicked.connect(lambda: self.save_huggingface_api_key(hf_api_key_input.text()))
         layout.addWidget(save_button, alignment=Qt.AlignCenter)
 
-        # Set layout for the Hugging Face settings page
         self.huggingface_settings_page.setLayout(layout)
 
-    def save_huggingface_api_key(self,api_key):
-        """
-        Save the Hugging Face API key securely.
-        """
+    def save_huggingface_api_key(self, api_key):
+        """Save the HuggingFace API key to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
         if not api_key:
             QMessageBox.warning(self, "Error", "API Key cannot be empty!")
             return
 
-        try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if os.path.exists(session_file):
-                with open(session_file, "r") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    if users.settings is None:
-                        users.settings = {}
+        config = {"api_key": api_key}
+        hf_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in hf_prefs if pref.setting_key == "huggingface"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="huggingface",
+                setting_value=config
+            )
 
-                    if not isinstance(users.settings.json(), dict):
-                        users.settings = json.loads(users.settings.json())
-                    users.settings["huggingface_token"] = api_key
-                    Users.update_user_by_id(id=users.id, updated={"settings": users.settings})
-                    QMessageBox.information(self, "HuggingFace", f"API Key saved successfully!")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save API Key: {e}")
+        QMessageBox.information(self, "HuggingFace", "API Key saved successfully!")
 
-    def fetch_url(self,url, key):
-        import requests
+    def fetch_url(self, url, key):
+        """Fetch data from a URL with authorization."""
         try:
             headers = {
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json"
             }
-
             response = requests.get(url, headers=headers)
-            if response.status_code!=200:
+            if response.status_code != 200:
+                logger.warning(f"Connection error: {response.reason}")
                 QMessageBox.warning(self, "Connection Error", f"Connection error: {response.reason}")
-                return
+                return None
             return response.json()
         except Exception as e:
-            # Handle connection error here
-            QMessageBox.warning(self,"Connection Error",f"Connection error: {e}")
+            logger.error(f"Connection error: {e}")
+            QMessageBox.warning(self, "Connection Error", f"Connection error: {e}")
             return None
 
-    def get_all_models_raw(self,base_url_input, api_key_input):
+    def get_all_models_raw(self, base_url_input, api_key_input):
+        """Fetch all models from the given base URL."""
+        if isinstance(base_url_input, QLabel):
+            base_url_input = base_url_input.text()
         tasks = self.fetch_url(f"{base_url_input}/models", api_key_input)
         return tasks
 
@@ -874,50 +863,55 @@ class AndroidSettingsDialog(QDialog):
         self.dynamic_connection_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.dynamic_connection_widget)
 
-        # Load initial data from the database
-        self.load_initial_data()
-
-        # Add Scroll Area to Main Layout
+        # Add Scroll Area to Layout
         layout.addWidget(self.scroll_area)
+
+        # Load initial data from preferences
+        self.load_initial_data()
 
         # Add Plus Button
         plus_button = QPushButton()
-        plus_button.clicked.connect(lambda : self.add_connections_form())
-        plus_button.setIcon(QIcon(os.path.join(JARVIS_DIR,"icons","plus.svg")))
+        plus_button.clicked.connect(lambda: self.add_connections_form())
+        plus_button.setIcon(QIcon(os.path.join(JARVIS_DIR, "icons", "plus.svg")))
         layout.addWidget(plus_button)
 
         # Set layout for the connection page
         self.connection_page.setLayout(layout)
 
-    def load_initial_data(self):
-        """Load initial Base URL and API Key pairs from the database."""
+    def get_current_user_id(self):
+        """Get the current user's ID from session.json."""
         try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            with open(session_file, "r") as f:
-                data = json.load(f)
-            connections = []
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users and users.settings:
-                    connections = json.loads(users.settings.json()).get("openai", [])
-
-            if connections:
-                for connection in connections:
-                    self.add_connection_fields(connection.get("base_url"), connection.get("api_key"))
-
+            from config import SessionManager
+            session = SessionManager()
+            session.load_session()
+            data = session.get_email()
+            user = Users.get_user_by_email(data)
+            return user.id if user else None
         except Exception as e:
-            print(f"Failed to load initial data: {e}")
+            logger.error(f"Error getting current user ID: {e}")
+            return None
+
+    def load_initial_data(self):
+        """Load initial Base URL and API Key pairs from the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            logger.warning("No user logged in when loading initial data")
+            return
+        openai_prefs = Preferences.get_preferences_by_user_id(user_id)
+        openai_config = next((pref.setting_value for pref in openai_prefs if pref.setting_key == "openai"), [])
+        for conn in openai_config:
+            self.add_connection_fields(conn.get("base_url").replace('"',""), conn.get("api_key"))
 
     def add_connections_form(self):
-        """Show the form to add a new core."""
+        """Show the form to add a new connection."""
         form_dialog = QDialog(self)
-        form_dialog.setWindowTitle("Add New Connections")
+        form_dialog.setWindowTitle("Add New Connection")
         form_layout = QVBoxLayout()
 
-        # Base Url
-        name_label = QLabel("Base Url:")
+        # Base URL
+        name_label = QLabel("Base URL:")
         name_input = QLineEdit()
-        name_input.setPlaceholderText("Enter Base url:")
+        name_input.setPlaceholderText("Enter Base URL")
         form_layout.addWidget(name_label)
         form_layout.addWidget(name_input)
 
@@ -925,6 +919,7 @@ class AndroidSettingsDialog(QDialog):
         description_label = QLabel("API Key:")
         description_input = QLineEdit()
         description_input.setPlaceholderText("Enter API Key")
+        description_input.setEchoMode(QLineEdit.Password)
         form_layout.addWidget(description_label)
         form_layout.addWidget(description_input)
 
@@ -951,24 +946,26 @@ class AndroidSettingsDialog(QDialog):
         # Save Button
         save_button = QPushButton("Save")
         save_button.clicked.connect(
-            lambda: self.save_all_connections(api_key_in2=description_input.text(),base_url_in2=name_input.text())
+            lambda: self.save_all_connections(api_key_in2=description_input.text(), base_url_in2=name_input.text())
         )
         form_layout.addWidget(save_button, alignment=Qt.AlignCenter)
 
         form_dialog.setLayout(form_layout)
         form_dialog.exec_()
 
-    def add_connection_fields(self,  base_url: str = None, api_key: str = None):
+    def add_connection_fields(self, base_url: str = None, api_key: str = None):
         """Add a new pair of Base URL and API Key textboxes to the GUI."""
         connection_layout = QHBoxLayout()
 
         # Base URL Input
-        base_url_input = QLabel(base_url)
+        base_url_input = QLineEdit(base_url or "")
+        base_url_input.setPlaceholderText("Enter Base URL")
         connection_layout.addWidget(base_url_input)
 
         # API Key Input
-        api_key_input = QLineEdit(api_key)
+        api_key_input = QLineEdit(api_key or "")
         api_key_input.setEchoMode(QLineEdit.Password)
+        api_key_input.setPlaceholderText("Enter API Key")
         connection_layout.addWidget(api_key_input)
 
         # Toggle Visibility Button (Eye Icon)
@@ -996,7 +993,7 @@ class AndroidSettingsDialog(QDialog):
         remove_button = QPushButton()
         remove_button.setIcon(QIcon(minus_svg))
         remove_button.setFixedSize(30, 30)
-        remove_button.clicked.connect(lambda: self.remove_connection_fields(connection_layout,base_url_input,api_key_input))
+        remove_button.clicked.connect(lambda: self.remove_connection_fields(connection_layout, base_url_input, api_key_input))
         connection_layout.addWidget(remove_button)
 
         # Refresh Button (Repeat Icon)
@@ -1010,49 +1007,35 @@ class AndroidSettingsDialog(QDialog):
         # Add the layout to the dynamic layout
         self.dynamic_connection_layout.addLayout(connection_layout)
 
-
     def remove_connection_fields(self, connection_layout, base_url_input, api_key_input):
-        """
-        Remove a specific pair of Base URL and API Key.
-        """
+        """Remove a specific pair of Base URL and API Key."""
         base_url = base_url_input.text().strip()
         api_key = api_key_input.text().strip()
 
-        # Check if the inputs are valid before proceeding
         if not base_url or not api_key:
             QMessageBox.warning(self, "Error", "Base URL or API Key is missing!")
             return
 
-        try:
-            # Read the session file
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            with open(session_file, "r") as f:
-                data = json.load(f)
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
 
-            # Update the database/settings if "email" exists
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    settings = json.loads(users.settings.json())
-                    if "openai" in settings:
-                        # Remove the connection from settings
-                        updated_connections = [
-                            conn for conn in settings["openai"]
-                            if conn["base_url"] != base_url or conn["api_key"] != api_key
-                        ]
-                        settings["openai"] = updated_connections
-                        # Save the updated settings back to the database
-                        Users.update_user_by_id(
-                            id=users.id,
-                            updated={"settings": settings}
-                        )
-                        QMessageBox.information(
-                            self,
-                            "Success",
-                            f"Connection for {base_url} removed successfully!"
-                        )
-                    else:
-                        QMessageBox.warning(self, "Error", "No connections found to remove.")
+        try:
+            openai_prefs = Preferences.get_preferences_by_user_id(user_id)
+            openai_config = next((pref.setting_value for pref in openai_prefs if pref.setting_key == "openai"), [])
+            updated_connections = [
+                conn for conn in openai_config
+                if conn["base_url"] != base_url or conn["api_key"] != api_key
+            ]
+            existing_pref = next((pref for pref in openai_prefs if pref.setting_key == "openai"), None)
+            if existing_pref:
+                Preferences.update_preference_by_id(
+                    preference_id=existing_pref.preference_id,
+                    updated={"setting_value":  updated_connections}
+                )
+            else:
+                QMessageBox.warning(self, "Error", "No connections found to remove.")
 
             # Remove the row from the GUI
             while connection_layout.count():
@@ -1060,65 +1043,46 @@ class AndroidSettingsDialog(QDialog):
                 if widget:
                     widget.deleteLater()
 
+            QMessageBox.information(self, "Success", f"Connection for {base_url} removed successfully!")
         except Exception as e:
-            QMessageBox.critical(
-                self, "Error", f"An error occurred while removing the connection: {e}"
-            )
+            logger.error(f"Error removing connection: {e}")
+            QMessageBox.critical(self, "Error", f"An error occurred while removing the connection: {e}")
 
-    def save_all_connections(self,base_url_in2:str=None,api_key_in2:str=None):
-        """Save all Base URL and API Key pairs to the database."""
-        connections = []
-        session_file = os.path.join(SESSION_PATH, "session.json")
-        if os.path.exists(session_file):
-            with open(session_file, "r") as f:
-                data = json.load(f)
-        else:
-            data = {}
-        if "email" in data:
-            users = Users.get_user_by_email(data["email"])
-            if users:
-                if users.settings is None:
-                    users.settings = {}
-                try:
-                    if not isinstance(users.settings.json(), dict):
-                        users.settings = json.loads(users.settings.json())
-                except AttributeError as e:
-                    pass
-                connections=[]
-                if "openai" in users.settings:
-                    connections=users.settings["openai"]
+    def save_all_connections(self, base_url_in2: str = None, api_key_in2: str = None):
+        """Save all Base URL and API Key pairs to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        openai_prefs = Preferences.get_preferences_by_user_id(user_id)
+        connections = next((pref.setting_value for pref in openai_prefs if pref.setting_key == "openai"), {"connections": []})
 
         if base_url_in2 and api_key_in2:
             connections.append({"base_url": base_url_in2, "api_key": api_key_in2})
-        # If no connections were found, warn the user
-        if base_url_in2 is None or api_key_in2 is None or not connections:
-            QMessageBox.warning(self.connection_page, "Warning", "No connections found to save!")
+
+        if not connections:
+            QMessageBox.warning(self, "Warning", "No connections found to save!")
             return
 
+        existing_pref = next((pref for pref in openai_prefs if pref.setting_key == "openai"), None)
         try:
-            session_file = os.path.join(SESSION_PATH, "session.json")
-            if os.path.exists(session_file):
-                with open(session_file, "r") as f:
-                    data = json.load(f)
+            if existing_pref:
+                Preferences.update_preference_by_id(
+                    preference_id=existing_pref.preference_id,
+                    updated={"setting_value":  connections}
+                )
             else:
-                data = {}
-            if "email" in data:
-                users = Users.get_user_by_email(data["email"])
-                if users:
-                    if users.settings is None:
-                        users.settings = {}
-                    try:
-                        if not isinstance(users.settings.json(), dict):
-                            users.settings = json.loads(users.settings.json())
-                    except Exception as e:
-                        pass
-                    users.settings["openai"] = connections
-                    Users.update_user_by_id(id=users.id, updated={"settings": users.settings})
-
-            QMessageBox.information(self.connection_page, "Success", "All connections saved successfully!")
-
+                Preferences.insert_new_preference(
+                    preference_id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    setting_key="openai",
+                    setting_value=connections
+                )
+            QMessageBox.information(self, "Success", "All connections saved successfully!")
         except Exception as e:
-            QMessageBox.critical(self.connection_page, "Error", f"Failed to save connections: {e}")
+            logger.error(f"Error saving connections: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save connections: {e}")
 
     def create_agents_page(self):
         """Create the Agents settings page."""
@@ -1136,7 +1100,7 @@ class AndroidSettingsDialog(QDialog):
         # Dynamic Layout for Agents List
         self.agents_widget = QWidget()
         self.agents_layout = QVBoxLayout(self.agents_widget)
-        self.agents_layout.setSpacing(10)  # Space between rows
+        self.agents_layout.setSpacing(10)
         self.agents_layout.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area.setWidget(self.agents_widget)
@@ -1147,25 +1111,23 @@ class AndroidSettingsDialog(QDialog):
         add_button.clicked.connect(self.add_agent_form)
         layout.addWidget(add_button, alignment=Qt.AlignCenter)
 
-        # Set layout for the core page
+        # Set layout for the agents page
         self.agents_page = QWidget()
         self.agents_page.setLayout(layout)
         self.stacked_widget.addWidget(self.agents_page)
         self.stacked_widget.setCurrentWidget(self.agents_page)
 
-        # Load existing core
+        # Load existing agents
         self.load_agents()
 
     def load_agents(self):
-        """Load core from the database."""
-        # Simulated database query
-
+        """Load agents from the database."""
         agents = Agent.get_agents()
         for agent in agents:
-            self.add_agent_row(editable=True,id=agent.id,name=agent.name,description=agent.description)
+            self.add_agent_row(editable=True, id=agent.id, name=agent.name, description=agent.description)
 
-    def add_agent_row(self, name, description, editable=False,id:str=None):
-        """Add a row displaying an core."""
+    def add_agent_row(self, name, description, editable=False, id: str = None):
+        """Add a row displaying an agent."""
         row_layout = QHBoxLayout()
 
         # Agent Name
@@ -1188,11 +1150,11 @@ class AndroidSettingsDialog(QDialog):
             delete_button.clicked.connect(lambda: self.delete_agent(id=id))
             row_layout.addWidget(delete_button)
 
-        # Add the row layout to the core layout
+        # Add the row layout to the agents layout
         self.agents_layout.addLayout(row_layout)
 
     def add_agent_form(self):
-        """Show the form to add a new core."""
+        """Show the form to add a new agent."""
         form_dialog = QDialog(self)
         form_dialog.setWindowTitle("Add New Agent")
         form_layout = QVBoxLayout()
@@ -1200,14 +1162,14 @@ class AndroidSettingsDialog(QDialog):
         # Agent Name
         name_label = QLabel("Agent Name:")
         name_input = QLineEdit()
-        name_input.setPlaceholderText("Enter core name")
+        name_input.setPlaceholderText("Enter agent name")
         form_layout.addWidget(name_label)
         form_layout.addWidget(name_input)
 
         # Agent Description
         description_label = QLabel("Description:")
         description_input = QLineEdit()
-        description_input.setPlaceholderText("Enter core description")
+        description_input.setPlaceholderText("Enter agent description")
         form_layout.addWidget(description_label)
         form_layout.addWidget(description_input)
 
@@ -1235,69 +1197,68 @@ class AndroidSettingsDialog(QDialog):
 
     def browse_file(self, file_input):
         """Open a file dialog to select a file."""
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Autogen Agent  Files (*.json)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Autogen Agent Files (*.json)")
         if file_path:
             file_input.setText(file_path)
 
     def save_agent(self, name, description, file_path, dialog):
-        """Save the new core to the database."""
+        """Save the new agent to the database."""
         if not name or not description or not file_path:
             QMessageBox.warning(self, "Error", "All fields are required!")
             return
 
-        id=str(uuid.uuid4())
+        id = str(uuid.uuid4())
         try:
             with open(file_path, "r") as f:
                 data = json.load(f)
-            # Save to the database
-            file_name=os.path.basename(file_path)
-            if not os.path.exists(os.path.join(JARVIS_DIR,"data","core")):
-                os.makedirs(os.path.join(JARVIS_DIR,"data","core"),exist_ok=True)
-            shutil.copyfile(file_path,os.path.join(JARVIS_DIR,"data","core",file_name))
-            datas={
-                "file_name":file_name,
-                "data":data
-            }
-            Agent.insert_new_agent(id=id,name=name,description=description,file=datas)  # Replace with actual database save logic
-            self.add_agent_row(name, description, editable=True,id=id)
+            file_name = os.path.basename(file_path)
+            os.makedirs(os.path.join(JARVIS_DIR, "data", "agents"), exist_ok=True)
+            shutil.copyfile(file_path, os.path.join(JARVIS_DIR, "data", "agents", file_name))
+            datas = {"file_name": file_name, "data": data}
+            Agent.insert_new_agent(id=id, name=name, description=description, file=datas)
+            self.add_agent_row(name, description, editable=True, id=id)
             dialog.accept()
             QMessageBox.information(self, "Saved", f"Agent '{name}' has been saved successfully!")
         except Exception as e:
-            QMessageBox.warning(self,"Error","Error in it")
+            logger.error(f"Error saving agent: {e}")
+            QMessageBox.warning(self, "Error", f"Error saving agent: {e}")
 
-    def delete_agent(self,id):
-        agents=Agent.get_agent_by_id(id)
-        agent_path=os.path.join(JARVIS_DIR,"data","core",agents.file.get("file_name"))
-        Agent.delete_agent_by_id(id)
-        if os.path.exists(agent_path):
-            os.remove(agent_path)
-        QMessageBox.information(self,"Delete Agent",'Deleted  Successfully!')
-        self.refresh_agents_list()
+    def delete_agent(self, id):
+        """Delete an agent from the database."""
+        try:
+            agent = Agent.get_agent_by_id(id)
+            agent_path = os.path.join(JARVIS_DIR, "data", "agents", agent.file.get("file_name"))
+            Agent.delete_agent_by_id(id)
+            if os.path.exists(agent_path):
+                os.remove(agent_path)
+            QMessageBox.information(self, "Delete Agent", "Deleted Successfully!")
+            self.refresh_agents_list()
+        except Exception as e:
+            logger.error(f"Error deleting agent: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to delete agent: {e}")
 
     def edit_agent(self, id):
-        """Edit an existing core."""
-        # Fetch the core details by ID
+        """Edit an existing agent."""
         agent = Agent.get_agent_by_id(id)
         if not agent:
             QMessageBox.critical(self, "Error", "Agent not found!")
             return
 
-        # Create the dialog
         form_dialog = QDialog(self)
         form_dialog.setWindowTitle("Edit Agent")
         form_layout = QVBoxLayout()
 
         # Agent Name
         name_label = QLabel("Agent Name:")
-        name_input = QLineEdit(agent.name)  # Populate with current name
-        name_input.setPlaceholderText("Enter core name")
+        name_input = QLineEdit(agent.name)
+        name_input.setPlaceholderText("Enter agent name")
         form_layout.addWidget(name_label)
         form_layout.addWidget(name_input)
 
         # Agent Description
         description_label = QLabel("Description:")
-        description_input = QLineEdit(agent.description)  # Populate with current description
-        description_input.setPlaceholderText("Enter core description")
+        description_input = QLineEdit(agent.description)
+        description_input.setPlaceholderText("Enter agent description")
         form_layout.addWidget(description_label)
         form_layout.addWidget(description_input)
 
@@ -1326,40 +1287,42 @@ class AndroidSettingsDialog(QDialog):
         )
         form_layout.addWidget(save_button, alignment=Qt.AlignCenter)
 
-        # Set layout and show dialog
         form_dialog.setLayout(form_layout)
         form_dialog.exec_()
 
     def save_edited_agent(self, id, name, description, file, dialog):
-        """Save the edited core to the database."""
+        """Save the edited agent to the database."""
         if not name or not description or not file:
             QMessageBox.warning(self, "Error", "All fields are required!")
             return
 
-        # Update the core in the database
-        success = Agent.update_agent_by_id(
-            id=id,
-            updated={
-                "name": name,
-                "description": description,
-                "file": file
-            }
-        )
-
-        if success:
-            QMessageBox.information(self, "Success", f"Agent '{name}' has been updated successfully!")
-            dialog.accept()
-            self.refresh_agents_list()  # Refresh the core list in the GUI
-        else:
-            QMessageBox.critical(self, "Error", "Failed to update the core!")
+        try:
+            success = Agent.update_agent_by_id(
+                id=id,
+                updated={
+                    "name": name,
+                    "description": description,
+                    "file": {"file_name": file}
+                }
+            )
+            if success:
+                QMessageBox.information(self, "Success", f"Agent '{name}' has been updated successfully!")
+                dialog.accept()
+                self.refresh_agents_list()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to update the agent!")
+        except Exception as e:
+            logger.error(f"Error updating agent: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to update agent: {e}")
 
     def refresh_agents_list(self):
-        """Refresh the list of core in the GUI."""
+        """Refresh the list of agents in the GUI."""
         for i in reversed(range(self.agents_layout.count())):
             item = self.agents_layout.takeAt(i)
             if item.widget():
                 item.widget().deleteLater()
-
+            elif item.layout():
+                self.clear_layout(item.layout())
         self.load_agents()
 
     def go_to_detail_page(self, setting_name):
@@ -1372,14 +1335,12 @@ class AndroidSettingsDialog(QDialog):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-
             if confirmation == QMessageBox.Yes:
-                session_file = os.path.join(SESSION_PATH, "session.json")
-                if os.path.exists(session_file):
-                    os.remove(session_file)
-
+                from config import SessionManager
+                session = SessionManager()
+                session.clear_session()
                 QMessageBox.information(self, "Logged Out", "You have been logged out successfully.")
-                self.close()  # Closes the settings dialog
+                self.close()
         elif "Wake Word Settings" in setting_name:
             wakeword_page = self.create_wakeword_page()
             self.stacked_widget.addWidget(wakeword_page)
@@ -1396,7 +1357,7 @@ class AndroidSettingsDialog(QDialog):
             self.stacked_widget.setCurrentWidget(self.connection_page)
         elif setting_name == "Agent":
             self.create_agents_page()
-        elif setting_name=="HuggingFace":
+        elif setting_name == "HuggingFace":
             self.create_huggingface_page()
             self.stacked_widget.setCurrentWidget(self.huggingface_settings_page)
         elif "LLM" == setting_name:
@@ -1415,16 +1376,25 @@ class AndroidSettingsDialog(QDialog):
         visible_count = 0
         for i in range(self.main_layout.count() - 1):  # Exclude the "No Setting Available" label
             item = self.main_layout.itemAt(i)
-            if isinstance(item, QHBoxLayout):  # Check if it's a toggle row
+            if isinstance(item, QHBoxLayout):
                 label = item.itemAt(0).widget()
                 if isinstance(label, ClickableLabel):
                     is_match = text.lower() in label.text().lower()
                     label.setVisible(is_match)
-                    item.itemAt(1).widget().setVisible(is_match)  # Toggle visibility
+                    item.itemAt(1).widget().setVisible(is_match)
                     visible_count += is_match
-            elif isinstance(item, QLabel):  # Check if it's a section label
+            elif isinstance(item, QLabel):
                 is_match = text.lower() in item.text().lower()
                 item.widget().setVisible(is_match)
                 visible_count += is_match
-        # Show or hide "No Setting Available" message
         self.no_setting_label.setVisible(visible_count == 0)
+
+if __name__ == "__main__":
+    import sys
+    from PyQt5.QtWidgets import QApplication
+    from jarvis_integration.internals.db import create_tables
+    create_tables()
+    app = QApplication(sys.argv)
+    c = AndroidSettingsDialog()
+    c.show()
+    sys.exit(app.exec_())

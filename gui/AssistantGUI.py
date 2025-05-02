@@ -17,14 +17,14 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu,QAction,QStackedLayout
 from config import JARVIS_DIR
 from gui.user_setting import UserDialog
-from gui.settings import AndroidSettingsDialog
 from gui.AssistantOpenGLWidget import AssistantOpenGLWidget
 from config import SESSION_PATH
 import pyaudio
 import pvporcupine
 import json
 import threading
-from utils.models.users import Users
+from jarvis_integration.models.users import Users
+from core.Agent_models import get_model_from_database
 import speech_recognition as sr
 from PyQt5.QtCore import  QTimer, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
@@ -198,8 +198,7 @@ class AssistantGUI(QMainWindow):
         self.setGeometry(100, 100, 800, 800)
         self.setWindowTitle("J.A.R.V.I.S.")
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)  # Changed to OnTop for usability
 
     def setup_threads(self):
         # 🗣️ Speech Recognition
@@ -207,10 +206,6 @@ class AssistantGUI(QMainWindow):
         self.speech_worker = SpeechRecognitionWorker(self.recognizer, self.microphone, self.stop_recognition)
         self.speech_worker.moveToThread(self.speech_thread)
 
-        # 🧠 Agent
-        self.agent_thread = QThread()
-        self.agent_worker = AgentWorker()
-        self.agent_worker.moveToThread(self.agent_thread)
 
         # 🔊 TTS
         self.tts_thread = QThread()
@@ -227,6 +222,11 @@ class AssistantGUI(QMainWindow):
         self.consciousness_worker = ConsciousnessWorker(self.stop_recognition)
         self.consciousness_worker.moveToThread(self.consciousness_thread)
 
+        # 🧠 Agent
+        self.agent_thread = QThread()
+        self.agent_worker = AgentWorker()
+        self.agent_worker.moveToThread(self.agent_thread)
+
         # 👂 Wake Word
         if self.audio_stream:
             self.wake_word_thread = QThread()
@@ -240,9 +240,6 @@ class AssistantGUI(QMainWindow):
         self.speech_worker.listen_signal.connect(self.display_text)  # Better name
         self.speech_worker.error_signal.connect(self.display_error)
 
-        # 🧠 Agent Signals
-        self.agent_thread.started.connect(self.agent_worker.run)
-        self.agent_worker.response_signal.connect(self.start_tts)
 
         # 🔊 TTS Signals
         self.tts_thread.started.connect(self.tts_worker.run)
@@ -251,12 +248,15 @@ class AssistantGUI(QMainWindow):
         # 🔔 Alerts Signals
         self.alert_thread.started.connect(self.alert_checker.run)
         self.alert_checker.alert_triggered.connect(self.handle_alerts)
+        if get_model_from_database() is not None:
+            # 👁️‍🗨️ Consciousness Signals
+            self.consciousness_thread.started.connect(self.consciousness_worker.run)
+            self.consciousness_worker.update_signal.connect(self.display_proactive_update)
+            self.consciousness_worker.image_signal.connect(self.process_image_input)
 
-        # 👁️‍🗨️ Consciousness Signals
-        self.consciousness_thread.started.connect(self.consciousness_worker.run)
-        self.consciousness_worker.update_signal.connect(self.display_proactive_update)
-        self.consciousness_worker.image_signal.connect(self.process_image_input)
-
+            # 🧠 Agent Signals
+            self.agent_thread.started.connect(self.agent_worker.run)
+            self.agent_worker.response_signal.connect(self.start_tts)
         # 👂 Wake Word Signals
         if self.audio_stream:
             self.wake_word_thread.started.connect(self.wake_word_worker.run)
@@ -408,11 +408,11 @@ class AssistantGUI(QMainWindow):
                 "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C)
             },
             {
-                "name": "settings_button",
+                "name": "home_button",
                 "geometry": (180, 20, 60, 60),
-                "icon": "settings.svg",
-                "callback": self.open_settings_dialog,
-                "tooltip": "Open Settings",
+                "icon": "Home.svg",
+                "callback": self.open_home_dialog,
+                "tooltip": "Open Home",
                 "key": QKeySequence(Qt.CTRL + Qt.Key.Key_S)
             },
             {
@@ -424,9 +424,9 @@ class AssistantGUI(QMainWindow):
                 "key": QKeySequence(Qt.CTRL + Qt.Key.Key_F1)
             },
             {
-                "name": "home_button",
+                "name": "dashboard_button",
                 "geometry": (340, 20, 60, 60),
-                "icon": "home.svg",
+                "icon": "assistant.svg",
                 "callback": self.toggle_dashboard_view,  # <- switch between views
                 "tooltip": "Toggle Dashboard View",
                 "key": QKeySequence(Qt.CTRL + Qt.Key.Key_H)
@@ -474,12 +474,15 @@ class AssistantGUI(QMainWindow):
     def toggle_dashboard_view(self):
         """Switch between Assistant and Security Dashboard using state."""
         if self.current_view == "assistant":
+            mic_svg = os.path.join(JARVIS_DIR, "icons", "shield.svg")
+            self.dashboard_button.setIcon(QIcon(mic_svg))
             self.stacked_layout.setCurrentIndex(1)
             self.current_view = "security"
         else:
+            mic_svg = os.path.join(JARVIS_DIR, "icons", "assistant.svg")
+            self.dashboard_button.setIcon(QIcon(mic_svg))
             self.stacked_layout.setCurrentIndex(0)
             self.current_view = "assistant"
-
 
     def record(self):
         self.gl_widget.toggle_animation()
@@ -542,7 +545,6 @@ class AssistantGUI(QMainWindow):
         if self.speech_thread.isRunning():
             self.speech_thread.quit()
             self.speech_thread.wait()
-        print("TTS is completed!")
         if not self.tts_thread.isRunning() and not self.agent_thread.isRunning() and not self.speech_thread.isRunning():
             self.stop_interaction_animation()
 
@@ -551,7 +553,7 @@ class AssistantGUI(QMainWindow):
         dialog.exec_()
 
     def get_user_face_from_database(self):
-        from utils.models.users import Users
+        from jarvis_integration.models.users import Users
         import json
         import os  # Need to import os at the top
 
@@ -620,40 +622,10 @@ class AssistantGUI(QMainWindow):
         cap.release()
         return None
 
-    def open_settings_dialog(self):
-        from deepface import DeepFace
-
-        image = self.get_face()
-        if image is None:
-                QMessageBox.critical(self, "Camera Error", "Cannot open camera")
-                return
-
-        try:
-            db_face = self.get_user_face_from_database()
-            if db_face is None:
-                    QMessageBox.critical(self, "Database Error", "Failed to retrieve user face from database")
-                    return
-
-            verify = DeepFace.verify(
-                    img1_path=image,
-                    img2_path=db_face,
-                    enforce_detection=False,
-                    model_name='Facenet512',
-                    distance_metric="cosine",
-                    align=True,
-                    detector_backend="opencv"
-                )
-            if verify['verified']:
-                dialog = AndroidSettingsDialog(self)
-                dialog.exec_()
-            else:
-                QMessageBox.warning(self, "Verification", "Face verification failed")
-                log.warning("Face verification failed")
-                return
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Verification failed: {str(e)}")
-            log.critical(f"Verification failed: {str(e)}")
-            return
+    def open_home_dialog(self):
+        from gui.Home import HomeDialog
+        dialog = HomeDialog(self)
+        dialog.exec_()
         # If the session file is removed, go back to login
         if not os.path.exists(os.path.join(SESSION_PATH, "session.json")):
             self.login_page()
@@ -684,7 +656,7 @@ class AssistantGUI(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event and show shutdown splash."""
-        from splash_screen import SplashScreen
+        from gui.splash_screen import SplashScreen
         from PyQt5.QtWidgets import QApplication
         from time import sleep
 

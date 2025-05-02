@@ -1,28 +1,16 @@
-# Copyright 2025 Dawood Thouseef
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout,  QLineEdit, QLabel, QScrollArea,
+    QDialog, QVBoxLayout, QLineEdit, QLabel, QScrollArea,
     QPushButton, QWidget, QMessageBox, QGridLayout
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon, QPixmap
-from AppOpener import open as open_app, give_appnames
 import os
 from config import JARVIS_DIR
+from gui.settings import AndroidSettingsDialog  # Import the Settings dialog
+from gui.terminal.terminal_dialog import TerminalDialog
 
 class HomeDialog(QDialog):
-    """Android-style Apps Widget with grid layout for installed applications."""
+    """Android-style Apps Widget with grid layout for installed applications, including Virtual Assistant Terminal and Settings."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +18,7 @@ class HomeDialog(QDialog):
         self.setGeometry(100, 100, 700, 800)
         self.setStyleSheet("background-color: white;")  # Android-like white background
 
-        # Retrieve installed applications
+        # Retrieve installed applications and add Virtual Assistant Terminal and Settings
         self.applications = self.get_installed_applications()
 
         # Main Layout
@@ -71,11 +59,24 @@ class HomeDialog(QDialog):
 
     def get_installed_applications(self):
         """
-        Retrieve a list of installed applications using AppOpener.
-        Returns a list of dictionaries containing app names.
+        Retrieve a list of installed applications using AppOpener and add Virtual Assistant Terminal and Settings.
+        Returns a list of dictionaries containing app names and icons.
         """
-        appnames = give_appnames()  # Get available app names
-        return [{"name": app, "icon": os.path.join(JARVIS_DIR,"icons","jarvis-logo1.svg")} for app in sorted(appnames)]  # Default icon
+        # Get available app names from AppOpener
+        apps=[]
+        # Add Virtual Assistant Terminal
+        apps.append({
+            "name": "Virtual Assistant Terminal",
+            "icon": os.path.join(JARVIS_DIR, "icons", "terminal.svg") if os.path.exists(os.path.join(JARVIS_DIR, "icons", "terminal.svg")) else os.path.join(JARVIS_DIR, "icons", "jarvis-logo1.svg")
+        })
+
+        # Add Settings
+        apps.append({
+            "name": "Settings",
+            "icon": os.path.join(JARVIS_DIR, "icons", "settings.svg") if os.path.exists(os.path.join(JARVIS_DIR, "icons", "settings.svg")) else os.path.join(JARVIS_DIR, "icons", "jarvis-logo1.svg")
+        })
+
+        return apps
 
     def load_applications(self):
         """Load applications into the grid layout."""
@@ -116,7 +117,6 @@ class HomeDialog(QDialog):
         icon_label.setAlignment(Qt.AlignCenter)
 
         # App Name
-        # App Name
         name_label = QLabel(name)
         name_label.setFont(QFont("Arial", 10, QFont.Bold))
         name_label.setAlignment(Qt.AlignCenter)
@@ -128,20 +128,20 @@ class HomeDialog(QDialog):
         launch_button.setIconSize(pixmap.size())
         launch_button.setFixedSize(80, 80)
         launch_button.setStyleSheet("""
-                    QPushButton {
-                        border: 2px solid #DDDDDD;
-                        border-radius: 15px;
-                        background-color: white;
-                        padding: 5px;
-                    }
-                    QPushButton:hover {
-                        background-color: #E8F0FE;
-                        border-color: #2196F3;
-                    }
-                    QPushButton:pressed {
-                        background-color: #BBDEFB;
-                    }
-                """)
+            QPushButton {
+                border: 2px solid #DDDDDD;
+                border-radius: 15px;
+                background-color: white;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #E8F0FE;
+                border-color: #2196F3;
+            }
+            QPushButton:pressed {
+                background-color: #BBDEFB;
+            }
+        """)
         launch_button.clicked.connect(lambda: self.open_application(name))
 
         # Add to layout
@@ -162,11 +162,19 @@ class HomeDialog(QDialog):
             app_widget.setVisible(query in app_name)
 
     def open_application(self, app_name):
-        """Open the selected application using AppOpener."""
+        """Open the selected application."""
         try:
-            open_app(app_name)
-        except Exception:
-            QMessageBox.warning(self, "Error", f"Failed to open application '{app_name}'")
+            if app_name == "Virtual Assistant Terminal":
+                # Open the Terminal dialog
+                terminal_dialog = TerminalDialog(self)
+                terminal_dialog.exec_()
+            elif app_name == "Settings":
+                # Open the Settings dialog
+                settings_dialog = AndroidSettingsDialog(self)
+                settings_dialog.exec_()
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to open application '{app_name}': {e}")
 
 
 if __name__ == "__main__":
