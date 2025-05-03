@@ -96,14 +96,11 @@ def react_agent(state: React):
 
 def user_name():
     try:
-        session_json = os.path.join(SESSION_PATH, "session.json")
-        if os.path.exists(session_json):
-            with open(session_json, "r") as f:
-                data = json.load(f)
-            if "email" in data:
-                users = Users.get_user_by_email(data.get("email"))
-                return users.name
-        return None
+        from config import SessionManager
+        session=SessionManager()
+        session.load_session()
+        users = Users.get_user_by_email(session.get_email())
+        return users.name
     except (NameError, AttributeError) as e:
         log.error(f"Error in user_name: {e}")
         return "Tony Stark"
@@ -116,8 +113,7 @@ def generate_response(input_str: str, context: str) -> str:
     Address the user by name if known, and weave in awareness of past interactions, system state, and environmental data with effortless precision. 
     Avoid reasoning tags or unnecessary verbosity—deliver only the polished output, as I would for Mr. Stark.
     """
-    if user_name():
-        system += f"User identified as {user_name()}."
+    system += f"User identified as {user_name()}."
     prompt = ChatPromptTemplate.from_messages([
         SystemMessage(content=system),
         HumanMessage(content=f"Input: {input_str}\nEnvironmental and memory context:\n{context}"),
