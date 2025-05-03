@@ -9,3 +9,6 @@ QTextEdit {
     font-size: 10pt;
     selection-background-color: #333;
 }
+QTextEdit[command="suggest"] {
+    color: green;
+}

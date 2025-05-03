@@ -15,11 +15,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLineEdit, QPushButton, QTextEdit, QProgressBar, QLabel, QSplitter, QGroupBox,
                              QFormLayout, QSlider, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QTableWidget,
                              QTableWidgetItem, QFileDialog, QInputDialog, QTextBrowser, QMessageBox,
-                             QStackedWidget)
+                             QStackedWidget,)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 from crewai import Agent, Task, Crew, Process
-from sentence_transformers import SentenceTransformer
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas as pdf_canvas
 
@@ -68,8 +67,8 @@ class QueryThread(QThread):
 
 
 class CheExplorer(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,parent=None):
+        super().__init__(parent=parent)
         self.setWindowTitle("Chemistry Explorer Ultimate")
         self.setMinimumSize(1600, 1000)
         self.cache_db = sqlite3.connect("chem_explorer_cache.db", check_same_thread=False)
@@ -258,7 +257,7 @@ class CheExplorer(QMainWindow):
         )
 
     def init_openai(self):
-        if OpenAI:
+        if OpenAI and get_model_from_database() is not None:
             self.openai_client = OpenAI(api_key=get_model_from_database().api_key,
                                         base_url=get_model_from_database().url)
         else:
@@ -1496,6 +1495,7 @@ class CheExplorer(QMainWindow):
             QMessageBox.critical(self, "Error", "Please enter a query.")
             return
         try:
+            from sentence_transformers import SentenceTransformer
             model = SentenceTransformer('all-MiniLM-L6-v2')
             cursor = self.cache_db.cursor()
             cursor.execute("SELECT reaction, result FROM reactions")

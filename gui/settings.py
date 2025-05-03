@@ -1,16 +1,4 @@
-# Copyright 2025 Dawood Thouseef
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 import uuid
 import logging
 import os
@@ -129,7 +117,7 @@ class AndroidSettingsDialog(QDialog):
         # Sections with Toggles
         self.add_settings_section("General", ["Agent", "Memory", "LLM Settings"])
         self.add_settings_section("Wake Word", ["Wake Word Settings"])
-        self.add_settings_section("Integrations", ["Integration"])
+        self.add_settings_section("Integrations", ["Integration","Web Search"])
         self.add_settings_section("User", ["Logout"])
 
         # Message for "No Setting Available"
@@ -389,7 +377,118 @@ class AndroidSettingsDialog(QDialog):
             )
 
         QMessageBox.information(self, "Saved", "Wake word configuration saved successfully!")
+    def create_web_search_page(self):
+        """Create the web search configuration page."""
+        page = QWidget()
+        layout = QVBoxLayout()
 
+        # Back Button
+        back_button = QPushButton("Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button, alignment=Qt.AlignLeft)
+
+        # Load user and preferences
+        user_id = self.get_current_user_id()
+        if not user_id:
+            user_id="0091c4ae-7ed3-4763-ad64-9cc1c3b62ee7"
+        # Fetch web search settings from preferences
+        web_search_prefs = Preferences.get_preferences_by_user_id(user_id)
+        web_search_config = next((pref.setting_value for pref in web_search_prefs if pref.setting_key == "web_search"), {})
+
+        # Search Engine Dropdown
+        engine_layout = QHBoxLayout()
+        engine_label = QLabel(f"Search Engine Selected: {web_search_config.get('search_engine', 'None')}")
+        self.search_engine = QComboBox()
+        self.search_engine.addItems(["Select Engine", "Brave", "Google", "DuckDuckGo", "Edge"])
+        self.search_engine.setCurrentText(web_search_config.get("search_engine", "Select Engine"))
+        engine_layout.addWidget(engine_label)
+        engine_layout.addWidget(self.search_engine, alignment=Qt.AlignCenter)
+        self.search_engine.currentIndexChanged.connect(self.web_search_click_action)
+        layout.addLayout(engine_layout)
+
+        # Configure Button
+        self.config_button = QVBoxLayout()
+        layout.addLayout(self.config_button)
+
+        # Preload settings if available
+        if web_search_config:
+            self.web_search_click_action(self.search_engine.currentIndex())
+
+        page.setLayout(layout)
+        return page
+
+    def web_search_click_action(self, index):
+        """Handle web search engine selection."""
+        self.clear_dynamic_widgets()
+        layout = self.config_button
+
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        # Load existing web search settings
+        web_search_prefs = Preferences.get_preferences_by_user_id(user_id)
+        web_search_config = next((pref.setting_value for pref in web_search_prefs if pref.setting_key == "web_search"), {})
+
+        if index == 1:  # Brave
+            # API Key Input
+            api_layout = QHBoxLayout()
+            api_label = QLabel("API Key:")
+            self.api_input = QLineEdit(web_search_config.get("api_key", ""))
+            self.api_input.setPlaceholderText("Enter Brave API key")
+            api_layout.addWidget(api_label)
+            api_layout.addWidget(self.api_input)
+            layout.addLayout(api_layout)
+
+            # Save Button
+            save_button = QPushButton("Save")
+            save_button.clicked.connect(self.save_web_search_configuration)
+            layout.addWidget(save_button, alignment=Qt.AlignCenter)
+        elif index in [2, 3, 4]:  # Google, DuckDuckGo, Edge
+            # Save Button (no API key needed)
+            save_button = QPushButton("Save")
+            save_button.clicked.connect(self.save_web_search_configuration)
+            layout.addWidget(save_button, alignment=Qt.AlignCenter)
+
+
+    def save_web_search_configuration(self):
+        """Save the web search configuration to the preference table."""
+        search_engine = self.search_engine.currentText()
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        if search_engine == "Select Engine":
+            QMessageBox.warning(self, "Save Failed", "Please select a search engine!")
+            return
+
+        config = {"search_engine": search_engine}
+        if search_engine == "Brave":
+            api_key = self.api_input.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "Save Failed", "API Key is required for Brave!")
+                return
+            config["api_key"] = api_key
+
+        # Save to preference table
+        web_search_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in web_search_prefs if pref.setting_key == "web_search"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="web_search",
+                setting_value=config
+            )
+
+        QMessageBox.information(self, "Saved", "Web search configuration saved successfully!")
     def create_memory_page(self):
         """Create the memory configuration page."""
         page = QWidget()
@@ -1349,6 +1448,11 @@ class AndroidSettingsDialog(QDialog):
             memory_page = self.create_memory_page()
             self.stacked_widget.addWidget(memory_page)
             self.stacked_widget.setCurrentWidget(memory_page)
+        elif setting_name == "Web Search":
+            web_search_page = self.create_web_search_page()
+            self.stacked_widget.addWidget(web_search_page)
+            self.stacked_widget.setCurrentWidget(web_search_page)
+
         elif setting_name == "LLM Settings":
             self.create_llm_settings_page()
             self.stacked_widget.setCurrentWidget(self.llm_settings_page)

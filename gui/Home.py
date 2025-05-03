@@ -8,6 +8,7 @@ import os
 from config import JARVIS_DIR
 from gui.settings import AndroidSettingsDialog  # Import the Settings dialog
 from gui.terminal.terminal_dialog import TerminalDialog
+from gui.CheExplorer import CheExplorer
 
 class HomeDialog(QDialog):
     """Android-style Apps Widget with grid layout for installed applications, including Virtual Assistant Terminal and Settings."""
@@ -75,7 +76,12 @@ class HomeDialog(QDialog):
             "name": "Settings",
             "icon": os.path.join(JARVIS_DIR, "icons", "settings.svg") if os.path.exists(os.path.join(JARVIS_DIR, "icons", "settings.svg")) else os.path.join(JARVIS_DIR, "icons", "jarvis-logo1.svg")
         })
-
+        apps.append({
+            "name": "CheExplorer",
+            "icon": os.path.join(JARVIS_DIR, "icons", "test.svg") if os.path.exists(
+                os.path.join(JARVIS_DIR, "icons", "test.svg")) else os.path.join(JARVIS_DIR, "icons",
+                                                                                     "jarvis-logo1.svg")
+        })
         return apps
 
     def load_applications(self):
@@ -168,14 +174,20 @@ class HomeDialog(QDialog):
                 # Open the Terminal dialog
                 terminal_dialog = TerminalDialog(self)
                 terminal_dialog.exec_()
+
             elif app_name == "Settings":
                 # Open the Settings dialog
                 settings_dialog = AndroidSettingsDialog(self)
                 settings_dialog.exec_()
 
+            elif app_name == "CheExplorer":
+                # Open the CheExplorer
+                cheExplorer=CheExplorer()
+                cheExplorer.show()
+
+            self.close()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to open application '{app_name}': {e}")
-
 
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
