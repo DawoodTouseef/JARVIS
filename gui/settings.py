@@ -117,7 +117,7 @@ class AndroidSettingsDialog(QDialog):
         # Sections with Toggles
         self.add_settings_section("General", ["Agent", "Memory", "LLM Settings"])
         self.add_settings_section("Wake Word", ["Wake Word Settings"])
-        self.add_settings_section("Integrations", ["Integration","Web Search"])
+        self.add_settings_section("Integrations", ["NextCloud","Web Search"])
         self.add_settings_section("User", ["Logout"])
 
         # Message for "No Setting Available"
@@ -489,6 +489,142 @@ class AndroidSettingsDialog(QDialog):
             )
 
         QMessageBox.information(self, "Saved", "Web search configuration saved successfully!")
+
+    def create_nextcloud_page(self):
+        """Create the NextCloud configuration page."""
+        page = QWidget()
+        layout = QVBoxLayout()
+
+        # Back Button
+        back_button = QPushButton("Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button, alignment=Qt.AlignLeft)
+
+        # Load user and preferences
+        user_id = self.get_current_user_id()
+        if not user_id:
+            error_label = QLabel("Error: No user logged in")
+            layout.addWidget(error_label)
+            page.setLayout(layout)
+            return page
+
+        # Fetch NextCloud settings from preferences
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        nextcloud_config = next((pref.setting_value for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), {})
+
+        # Enable/Disable Toggle
+        toggle_layout = QHBoxLayout()
+        toggle_label = QLabel("Enable NextCloud:")
+        self.nextcloud_toggle = QCheckBox()
+        self.nextcloud_toggle.setChecked(nextcloud_config.get("enabled", False))
+        toggle_layout.addWidget(toggle_label)
+        toggle_layout.addWidget(self.nextcloud_toggle, alignment=Qt.AlignRight)
+        self.nextcloud_toggle.stateChanged.connect(self.nextcloud_toggle_action)
+        layout.addLayout(toggle_layout)
+
+        # Configure Button (Dynamic Fields)
+        self.config_button = QVBoxLayout()
+        layout.addLayout(self.config_button)
+
+        # Preload settings if available
+        if nextcloud_config.get("enabled", False):
+            self.nextcloud_toggle_action(Qt.Checked)
+
+        page.setLayout(layout)
+        return page
+
+    def nextcloud_toggle_action(self, state):
+        """Handle NextCloud toggle action."""
+        self.clear_dynamic_widgets()
+        layout = self.config_button
+
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        # Load existing NextCloud settings
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        nextcloud_config = next((pref.setting_value for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), {})
+
+        if state == Qt.Checked:
+            # Base URL Input
+            base_url_layout = QHBoxLayout()
+            base_url_label = QLabel("Base URL:")
+            self.base_url_input = QLineEdit(nextcloud_config.get("base_url", ""))
+            self.base_url_input.setPlaceholderText("Enter NextCloud Base URL (e.g., https://cloud.example.com)")
+            base_url_layout.addWidget(base_url_label)
+            base_url_layout.addWidget(self.base_url_input)
+            layout.addLayout(base_url_layout)
+
+            # Username Input
+            username_layout = QHBoxLayout()
+            username_label = QLabel("Username:")
+            self.username_input = QLineEdit(nextcloud_config.get("username", ""))
+            self.username_input.setPlaceholderText("Enter NextCloud Username")
+            username_layout.addWidget(username_label)
+            username_layout.addWidget(self.username_input)
+            layout.addLayout(username_layout)
+
+            # Password Input
+            password_layout = QHBoxLayout()
+            password_label = QLabel("Password:")
+            self.password_input = QLineEdit(nextcloud_config.get("password", ""))
+            self.password_input.setPlaceholderText("Enter NextCloud Password")
+            self.password_input.setEchoMode(QLineEdit.Password)
+            password_layout.addWidget(password_label)
+            password_layout.addWidget(self.password_input)
+            layout.addLayout(password_layout)
+
+            # Save Button
+            save_button = QPushButton("Save")
+            save_button.clicked.connect(self.save_nextcloud_configuration)
+            layout.addWidget(save_button, alignment=Qt.AlignCenter)
+
+    def save_nextcloud_configuration(self):
+        """Save the NextCloud configuration to the preference table."""
+        user_id = self.get_current_user_id()
+        if not user_id:
+            QMessageBox.warning(self, "Error", "No user logged in!")
+            return
+
+        enabled = self.nextcloud_toggle.isChecked()
+        config = {"enabled": enabled}
+
+        if enabled:
+            base_url = self.base_url_input.text().strip()
+            username = self.username_input.text().strip()
+            password = self.password_input.text().strip()
+
+            if not base_url or not username or not password:
+                QMessageBox.warning(self, "Save Failed",
+                                    "All fields (Base URL, Username, Password) are required when NextCloud is enabled!")
+                return
+
+            config.update({
+                "base_url": base_url,
+                "username": username,
+                "password": password
+            })
+
+        # Save to preference table
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        existing_pref = next((pref for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), None)
+        if existing_pref:
+            Preferences.update_preference_by_id(
+                preference_id=existing_pref.preference_id,
+                updated={"setting_value": config}
+            )
+        else:
+            Preferences.insert_new_preference(
+                preference_id=str(uuid.uuid4()),
+                user_id=user_id,
+                setting_key="nextcloud",
+                setting_value=config
+            )
+
+        QMessageBox.information(self, "Saved", "NextCloud configuration saved successfully!")
+
     def create_memory_page(self):
         """Create the memory configuration page."""
         page = QWidget()
@@ -1452,6 +1588,10 @@ class AndroidSettingsDialog(QDialog):
             web_search_page = self.create_web_search_page()
             self.stacked_widget.addWidget(web_search_page)
             self.stacked_widget.setCurrentWidget(web_search_page)
+        elif setting_name == "NextCloud":
+            nextcloud_page = self.create_nextcloud_page()
+            self.stacked_widget.addWidget(nextcloud_page)
+            self.stacked_widget.setCurrentWidget(nextcloud_page)
 
         elif setting_name == "LLM Settings":
             self.create_llm_settings_page()

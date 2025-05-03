@@ -13,7 +13,7 @@
 # limitations under the License.
 """A team of workers"""
 from jarvis_integration.models.users import Users
-from config import SESSION_PATH
+from config import SESSION_PATH,SessionManager
 import json
 from langchain.tools.base import tool
 from core import get_model
@@ -30,6 +30,8 @@ from crewai_tools import BaseTool
 from datetime import datetime
 import os
 from pydantic import Field
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
 
 class NextCloudTool(BaseTool):
     name: str = "NextCloudTool"
@@ -45,18 +47,30 @@ class NextCloudTool(BaseTool):
 
     def login(self):
         # Initialize NextCloud client with server URL and credentials
+        session=SessionManager()
+        session.load_session()
+        email=session.get_email()
+
+        user_id=Users.get_user_by_email(email).id
+
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        nextcloud_config = next((pref for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), None)
+
         self.nc = nextcloud_client.Client(
-            "https://your-nextcloud-server.com"
-        )
+                    nextcloud_config.get("base_url")
+                )
         try:
-            self.nc.login("username", "password")
+            self.nc.login(nextcloud_config.get("username", ""), nextcloud_config.get("password", ""))
         except Exception as e:
             raise Exception(f"Failed to initialize NextCloud client: {str(e)}")
 
     def _run(self, action: str, **kwargs) -> str:
         ### General Information
         try:
-            self.login()
+            try:
+                self.login()
+            except Exception as e:
+                return str(e)
             if action == "get_info":
                 try:
                     config = self.nc.get_config()

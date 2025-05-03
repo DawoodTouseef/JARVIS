@@ -24,9 +24,11 @@ from typing import Callable,  List
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import BaseTool, FileWriterTool
 
-from config import JARVIS_DIR
+from config import JARVIS_DIR,SessionManager
 from core.Agent_models import get_vision_model_from_database
 from core.tools.standard_tools import NextCloudTool
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
 
 # ---------------------------- Human Input Tool ----------------------------
 class HumanInputRun(BaseTool):
@@ -185,12 +187,23 @@ def vision_agent(image_inputs, user_input: str):
     report_filename = f"vision_report_{timestamp}.json"
     report_path = os.path.join(JARVIS_DIR, "data", "reports", report_filename)
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
-
+    reporter_tools=[FileWriterTool(), HumanInputRun()]
+    session = SessionManager()
+    session.load_session()
+    email = session.get_email()
+    user_id = None
+    if email:
+        user_id = Users.get_user_by_email(email).id
+    if user_id is not None:
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        nextcloud_config = next((pref for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), None)
+        if nextcloud_config.get("enabled"):
+            reporter_tools.append(NextCloudTool())
     reporter = Agent(
         role="Report Generator",
         goal="Summarize and store visual analysis reports.",
         backstory="You format vision data and upload or save them.",
-        tools=[FileWriterTool(), NextCloudTool(), HumanInputRun()],
+        tools=reporter_tools,
         verbose=True,
         llm=llm
     )

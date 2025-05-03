@@ -23,7 +23,7 @@ from crewai import Agent, Task, Crew, LLM
 from crewai_tools import (
     WebsiteSearchTool, FileReadTool, BaseTool, ScrapeWebsiteTool,
     DirectoryReadTool, SerperDevTool, TXTSearchTool, EXASearchTool,
-    CodeDocsSearchTool, GithubSearchTool, CodeInterpreterTool,
+    CodeDocsSearchTool,  CodeInterpreterTool,
     CSVSearchTool, DOCXSearchTool, DirectorySearchTool,
     JSONSearchTool, MDXSearchTool, PDFSearchTool,
     RagTool, ScrapeElementFromWebsiteTool,
@@ -33,10 +33,13 @@ from crewai_tools import (
 import yfinance as yf
 import threading
 import time
-from config import JARVIS_DIR
+from config import JARVIS_DIR,SessionManager
 from core.Agent_models import get_model_from_database
 from core.tools.standard_tools import NextCloudTool
 import  inspect
+from typing import Optional
+from jarvis_integration.models.users import Users
+from jarvis_integration.models.preferences import Preferences
 
 # Exchange rates for multi-currency support
 EXCHANGE_RATES = {
@@ -53,6 +56,7 @@ def get_model():
             api_key=get_model_from_database().api_key,
             base_url=get_model_from_database().url,
         )
+    return None
 
 # Database setup with stock-specific tables
 conn = sqlite3.connect(os.path.join(JARVIS_DIR, "data", "assistant_data.db"), check_same_thread=False)
@@ -214,7 +218,7 @@ class YahooFinanceTool(BaseTool):
             stock = yf.Ticker(ticker)
             current_price = stock.history(period="1d")["Close"].iloc[-1]
             history_5d = stock.history(period="5d")["Close"]
-            history_custom = stock.history(period=f"{ma_period}d")["Close"]
+            #history_custom = stock.history(period=f"{ma_period}d")["Close"]
             trend = "up" if history_5d.iloc[-1] > history_5d.iloc[0] else "down" if history_5d.iloc[-1] < history_5d.iloc[0] else "stable"
             volatility = history_5d.std()
             risk = "Low" if volatility < 5 else "Medium" if volatility < 15 else "High"
@@ -235,7 +239,7 @@ class DatabaseTool(BaseTool):
     description:str = "Manages portfolio, watchlist, purchases (with currency), alerts, price history, preferences, queries, and notifications in SQLite."
 
 
-    def _run(self, action: str, **kwargs) -> str:
+    def _run(self, action: str, **kwargs) -> Optional[str]:
         db_name = os.path.join(JARVIS_DIR, "data", "assistant_data.db")
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
@@ -400,15 +404,28 @@ if  get_model_from_database() is not None:
         "JSONSearchTool": JSONSearchTool(config=config),
         "MDXSearchTool": MDXSearchTool(config=config),
         "PDFSearchTool": PDFSearchTool(config=config),
-        "RagTool": RagTool(config=config),
+        "RagTool": RagTool(),
         "ScrapeElementFromWebsiteTool": ScrapeElementFromWebsiteTool(),
         "SeleniumScrapingTool": SeleniumScrapingTool(),
         "XMLSearchTool": XMLSearchTool(config=config),
         "YoutubeChannelSearchTool": YoutubeChannelSearchTool(config=config),
-        "YoutubeVideoSearchTool": YoutubeVideoSearchTool(config=config),
-        "NextCloudTool":NextCloudTool(),
+        "YoutubeVideoSearchTool": YoutubeVideoSearchTool(config=config)
     }
-
+    session = SessionManager()
+    session.load_session()
+    email = session.get_email()
+    user_id = None
+    if email:
+        user_id = Users.get_user_by_email(email).id
+    if user_id is not None:
+        nextcloud_prefs = Preferences.get_preferences_by_user_id(user_id)
+        nextcloud_config = next((pref for pref in nextcloud_prefs if pref.setting_key == "nextcloud"), None)
+        if nextcloud_config.get("enabled"):
+            available_tools.update(
+                {
+                    "NextCloudTool":NextCloudTool(),
+                }
+            )
     available_tools = {k: v for k, v in available_tools.items() if v is not None}
     # Enhanced Executive Assistant with Stock Capabilities
     executive_assistant = Agent(
@@ -436,7 +453,8 @@ if  get_model_from_database() is not None:
             description=f"Create a detailed schedule: {user_input}.",
             agent=executive_assistant,
             expected_output="Comprehensive schedule with time blocks, locations, attendees, and priorities",
-            tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]]
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["MemoryManagerTool"]]
         )
 
     def prepare_briefing_task(topic):
@@ -444,28 +462,138 @@ if  get_model_from_database() is not None:
             description=f"Prepare a briefing on: {topic}.",
             agent=executive_assistant,
             expected_output="Concise briefing with key points, data, and recommendations",
-            tools=[available_tools["WebsiteSearchTool"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"]]
+            tools=[available_tools["WebsiteSearchTool"],
+                   available_tools["FileReadTool"],
+                   available_tools["MemoryManagerTool"]]
         )
     def draft_communication_task(details):
         return Task(
             description=f"Draft a formal communication: {details}.",
             agent=executive_assistant,
             expected_output="Polished, professional communication draft",
-            tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]]
+            tools=[available_tools["FileReadTool"],
+                   available_tools["MemoryManagerTool"],
+                   available_tools.get("NextCloudTool")]
         )
-    def crisis_management_task(situation): return Task(description=f"Develop a crisis plan for: {situation}.", agent=executive_assistant, expected_output="Crisis response plan with actions, contacts, and communication outline", tools=[available_tools["SecureContactManager"], available_tools["APICallTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-    def handle_confidential_file_task(file_path, action): return Task(description=f"Handle confidential file at: {file_path}, action: {action}.", agent=executive_assistant, expected_output="Summary of file contents or secure storage confirmation", tools=[available_tools["FileReadTool"], available_tools["EncryptDataTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-    def stakeholder_update_task(stakeholder_info): return Task(description=f"Prepare stakeholder update: {stakeholder_info}.", agent=executive_assistant, expected_output="Tailored stakeholder update", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
-    def manage_contact_task(action, name=None, role=None, contact_info=None): return Task(description=f"Manage contacts: Action: {action}, Name: {name}, Role: {role}, Info: {contact_info}.", agent=executive_assistant, expected_output="Result of contact management action", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
-    def prepare_meeting_task(meeting_details): return Task(description=f"Prepare meeting: {meeting_details}.", agent=executive_assistant, expected_output="Meeting agenda with attendees and background information", tools=[available_tools["SecureContactManager"], available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-    def review_history_task(): return Task(description="Retrieve request history from database.", agent=executive_assistant, expected_output="Sanitized list of previous requests with timestamps", tools=[available_tools["FileReadTool"], available_tools["MemoryManagerTool"], available_tools["NextCloudTool"]])
-    def analyze_competitor_task(company): return Task(description=f"Analyze competitor: {company}.", agent=executive_assistant, expected_output="Competitor analysis with market position, strengths, and weaknesses", tools=[available_tools["NextCloudTool"], available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-    def generate_report_task(data_file, format): return Task(description=f"Generate report from: {data_file} in {format}.", agent=executive_assistant, expected_output=f"Formatted report in {format}", tools=[available_tools["NextCloudTool"], available_tools["FileReadTool"], available_tools["CSVSearchTool"], available_tools["MemoryManagerTool"]])
-    def monitor_news_task(topic): return Task(description=f"Monitor news on: {topic}.", agent=executive_assistant, expected_output="Summary of recent news and trends", tools=[available_tools["WebsiteSearchTool"], available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-    def review_code_task(repo_url): return Task(description=f"Review code at: {repo_url}.", agent=executive_assistant, expected_output="Code review with suggestions and findings", tools=[available_tools["GithubSearchTool"], available_tools["CodeInterpreterTool"], available_tools["MemoryManagerTool"]])
-    def fetch_external_data_task(api_url): return Task(description=f"Fetch data from external API: {api_url}.", agent=executive_assistant, expected_output="Processed data from the API", tools=[available_tools["APICallTool"], available_tools["MemoryManagerTool"]])
-    def track_task_status_task(task_id, status=None, result=None): return Task(description=f"Track task status: {task_id}, Status: {status}, Result: {result}.", agent=executive_assistant, expected_output="Task status update or retrieval result", tools=[available_tools["TaskTrackerTool"], available_tools["MemoryManagerTool"]])
-    def schedule_follow_up_task(contact_name, message): return Task(description=f"Schedule a follow-up with {contact_name}: {message}.", agent=executive_assistant, expected_output="Confirmation of follow-up scheduling", tools=[available_tools["SecureContactManager"], available_tools["MemoryManagerTool"]])
+    def crisis_management_task(situation):
+        return Task(
+            description=f"Develop a crisis plan for: {situation}.",
+            agent=executive_assistant,
+            expected_output="Crisis response plan with actions, contacts, and communication outline",
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["APICallTool"],
+                   available_tools["MemoryManagerTool"],
+                   available_tools.get("NextCloudTool")]
+        )
+    def handle_confidential_file_task(file_path, action):
+        return Task(
+            description=f"Handle confidential file at: {file_path}, action: {action}.",
+            agent=executive_assistant,
+            expected_output="Summary of file contents or secure storage confirmation",
+            tools=[available_tools["FileReadTool"],
+                   available_tools["EncryptDataTool"],
+                   available_tools["MemoryManagerTool"],
+                   available_tools.get("NextCloudTool")]
+        )
+    def stakeholder_update_task(stakeholder_info):
+        return Task(
+            description=f"Prepare stakeholder update: {stakeholder_info}.",
+            agent=executive_assistant,
+            expected_output="Tailored stakeholder update",
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["MemoryManagerTool"]]
+        )
+    def manage_contact_task(action, name=None, role=None, contact_info=None):
+        return Task(
+            description=f"Manage contacts: Action: {action}, Name: {name}, Role: {role}, Info: {contact_info}.",
+            agent=executive_assistant,
+            expected_output="Result of contact management action",
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["MemoryManagerTool"]]
+        )
+    def prepare_meeting_task(meeting_details):
+        return Task(
+            description=f"Prepare meeting: {meeting_details}.",
+            agent=executive_assistant,
+            expected_output="Meeting agenda with attendees and background information",
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["FileReadTool"],
+                   available_tools["MemoryManagerTool"],
+                   available_tools.get("NextCloudTool")]
+        )
+    def review_history_task():
+        return Task(
+            description="Retrieve request history from database.",
+            agent=executive_assistant,
+            expected_output="Sanitized list of previous requests with timestamps",
+            tools=[available_tools["FileReadTool"],
+                   available_tools["MemoryManagerTool"],
+                   available_tools.get("NextCloudTool")]
+        )
+    def analyze_competitor_task(company):
+        return Task(
+            description=f"Analyze competitor: {company}.",
+            agent=executive_assistant,
+            expected_output="Competitor analysis with market position, strengths, and weaknesses",
+            tools=[available_tools["NextCloudTool"],
+                   available_tools["WebsiteSearchTool"],
+                   available_tools["APICallTool"],
+                   available_tools["MemoryManagerTool"]]
+        )
+    def generate_report_task(data_file, format):
+        return Task(
+            description=f"Generate report from: {data_file} in {format}.",
+            agent=executive_assistant,
+            expected_output=f"Formatted report in {format}",
+            tools=[available_tools.get("NextCloudTool"),
+                   available_tools["FileReadTool"],
+                   available_tools["CSVSearchTool"],
+                   available_tools["MemoryManagerTool"]]
+        )
+    def monitor_news_task(topic):
+        return Task(
+            description=f"Monitor news on: {topic}.",
+            agent=executive_assistant,
+            expected_output="Summary of recent news and trends",
+            tools=[available_tools["WebsiteSearchTool"],
+                   available_tools["APICallTool"],
+                   available_tools["MemoryManagerTool"]]
+        )
+    def review_code_task(repo_url):
+        return Task(
+            description=f"Review code at: {repo_url}.",
+            agent=executive_assistant,
+            expected_output="Code review with suggestions and findings",
+            tools=[
+                   available_tools["CodeInterpreterTool"],
+                   available_tools["MemoryManagerTool"]
+                   ]
+        )
+    def fetch_external_data_task(api_url):
+        return Task(
+            description=f"Fetch data from external API: {api_url}.",
+            agent=executive_assistant,
+            expected_output="Processed data from the API",
+            tools=[
+                available_tools["APICallTool"],
+                available_tools["MemoryManagerTool"]
+                   ]
+        )
+    def track_task_status_task(task_id, status=None, result=None):
+        return Task(
+            description=f"Track task status: {task_id}, Status: {status}, Result: {result}.",
+            agent=executive_assistant,
+            expected_output="Task status update or retrieval result",
+            tools=[available_tools["TaskTrackerTool"], available_tools["MemoryManagerTool"]]
+        )
+    def schedule_follow_up_task(contact_name, message):
+        return Task(
+            description=f"Schedule a follow-up with {contact_name}: {message}.",
+            agent=executive_assistant,
+            expected_output="Confirmation of follow-up scheduling",
+            tools=[available_tools["SecureContactManager"],
+                   available_tools["MemoryManagerTool"]]
+        )
 
     # New Stock-Related Tasks
     def check_stock_price_task(ticker):
