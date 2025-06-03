@@ -177,6 +177,7 @@ class ApplicationManager:
         self.current_page.show()
 
     def show_main_window(self):
+        print("closing Login page")
         from gui.AssistantGUI import AssistantGUI
         self.current_page.close()
         print("Showing main window")

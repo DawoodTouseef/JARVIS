@@ -20,8 +20,6 @@ def get_hass():
 class HomeAssistant:
     def __init__(self):
         self.ha=None
-        self.load_ha()
-
 
     def load_ha(self):
         self.base_url=get_hass().setting_value.get("base_url")

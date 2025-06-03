@@ -130,6 +130,7 @@ class AnimatedButton(QPushButton):
         painter.drawEllipse(self.rect().adjusted(3, 3, -3, -3))  # Adjust for the border
         painter.rotate(angle)
 
+
 class AnimatedLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -397,7 +398,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "mic-off.svg",
                 "callback": self.record,
                 "tooltip": "Start/Stop Recording",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_M)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_M),
+                "glyph": "globe",  # Holographic globe for recording
             },
             {
                 "name": "integrations_button",
@@ -405,7 +407,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "system-integration.svg",
                 "callback": self.change_color,
                 "tooltip": "Integration",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_C),
+                "glyph": "circuit",  # Holographic circuit for integrations
             },
             {
                 "name": "home_button",
@@ -413,7 +416,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "Home.svg",
                 "callback": self.open_home_dialog,
                 "tooltip": "Open Home",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_S)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_S),
+                "glyph": "symbol",  # Holographic symbol for home
             },
             {
                 "name": "users_button",
@@ -421,7 +425,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "user.svg",
                 "callback": self.open_users_dialog,
                 "tooltip": "Manage Users",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_F1)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_F1),
+                "glyph": "globe",  # Holographic globe for users
             },
             {
                 "name": "dashboard_button",
@@ -429,7 +434,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "assistant.svg",
                 "callback": self.toggle_dashboard_view,  # <- switch between views
                 "tooltip": "Toggle Dashboard View",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_H)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_H),
+                "glyph": "circuit",  # Holographic circuit for dashboard
             },
             {
                 "name": "call_button",
@@ -437,7 +443,8 @@ class AssistantGUI(QMainWindow):
                 "icon": "phone.svg",
                 "callback": self.call_application,
                 "tooltip": "Call Window",
-                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_P)
+                "key": QKeySequence(Qt.CTRL + Qt.Key.Key_P),
+                "glyph": "symbol",  # Holographic symbol for call
             },
             {
                 "name": "close_button",
@@ -445,17 +452,19 @@ class AssistantGUI(QMainWindow):
                 "icon": "close.svg",
                 "callback": self.closeapplication,
                 "tooltip": "Close Application",
-                "key": QKeySequence(Qt.ALT + Qt.Key.Key_F4)
+                "key": QKeySequence(Qt.ALT + Qt.Key.Key_F4),
+                "glyph": "globe",  # Holographic globe for close
             },
         ]
 
         for config in button_config:
             icon_path = os.path.join(JARVIS_DIR,"assests", "icons", config["icon"])
-            button = AnimatedButton(icon_path, self)
+            button = AnimatedButton(icon_path,self)
             button.setGeometry(*config["geometry"])
             button.clicked.connect(config["callback"])
-            button.setShortcut(config['key'])
+            button.setShortcut(config["key"])
             button.setToolTip(f"{config.get('tooltip', '')} ({config['key'].toString()})")
+            setattr(self, config["name"], button)
 
             # Add moving light effect on hover
             shadow = QGraphicsDropShadowEffect()

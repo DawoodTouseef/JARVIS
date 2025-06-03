@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import bcrypt
-import logging
+
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QTimer, QRegExp
-from PyQt5.QtGui import QColor, QFont, QRegExpValidator, QLinearGradient, QPainter
+from PyQt5.QtGui import QColor, QFont, QRegExpValidator, QLinearGradient, QPainter,QKeySequence
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGraphicsDropShadowEffect, QMessageBox
 )
@@ -83,6 +83,7 @@ class AnimatedLoginPage(QWidget):
         self.login_button = QPushButton("🚀 Login")
         self.login_button.setStyleSheet(self._button_style())
         self.login_button.clicked.connect(self.login)
+        self.login_button.setShortcut(QKeySequence(Qt.Key.Key_Enter))
 
         # Sign Up Button
         self.signup_button = QPushButton("📝 Sign Up")
